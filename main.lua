@@ -1,7 +1,9 @@
--- BeamMP Player Counter + Retention Analytics by Leshii413 with AI assistance
+-- BeamMP Player Counter + Retention Analytics by Leshii413 with Youtube, Reddit & AI assistance.
 -- Tracks daily, monthly, yearly and all-time unique users + total joins.
--- Baja75 Server 4 Config
---Version 08.10.2026.2
+-- Public Config
+--Version 08.10.2026.1600
+--
+-- Philippines Offset added for myself during creation to allow future timezone changes. Default can be easily changed to your timezone, just change based on your UTC + .or -
 --
 -- Tracks:
 --   * Daily / monthly / yearly unique authenticated users
