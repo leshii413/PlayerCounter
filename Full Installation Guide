@@ -1,0 +1,1022 @@
+# BeamMP Server + PlayerCounter
+## Full Installation Guide
+
+This guide takes you from a fresh machine to a working **BeamMP Server 3.x** with public/private hosting, mods, PlayerCounter retention analytics, and a scheduled weekly stats webhook.
+
+> This guide targets BeamMP Server 3.x. BeamMP Server 2.x scripting is deprecated and is not compatible with the current 3.x Lua plugin model.
+
+## 1. Final directory layout
+
+```text
+BeamMP-Server/
+├── BeamMP-Server              # Linux binary
+├── BeamMP-Server.exe          # Windows equivalent
+├── ServerConfig.toml
+├── Server.log
+├── Resources/
+│   ├── Client/
+│   │   ├── map_or_vehicle_mod.zip
+│   │   └── ...
+│   └── Server/
+│       └── PlayerCounter/
+│           ├── main.lua
+│           └── data/
+│               ├── stats.json
+│               └── joins.csv
+└── ...
+```
+
+## 2. Requirements
+
+BeamMP Server runs on Windows and Linux. For a public Internet server you should have a reachable IPv4 address, the selected BeamMP port open for both TCP and UDP, a BeamMP AuthKey, and enough host/network capacity for the map, vehicles, players, and mods you intend to run.
+
+The normal default BeamMP port is:
+
+```text
+30814
+```
+
+Both protocols are required:
+
+```text
+TCP 30814
+UDP 30814
+```
+
+If you host several BeamMP instances on one machine, assign a unique port to each instance, for example 30814, 30815, 30816.
+
+For the weekly website webhook you also need Python 3, outbound HTTPS access, a website endpoint, and a private webhook secret shared only by the game server and website.
+
+## 3. Create a BeamMP AuthKey
+
+Use the official BeamMP Keymaster and sign in with Discord. Create a key, give it an internal name, copy the generated AuthKey, and store it securely.
+
+Treat the AuthKey like a password. Do not post it to GitHub, screenshots, Discord, documentation, or public configuration examples. A single key should not be used by multiple simultaneously running servers.
+
+## 4. Windows BeamMP installation
+
+Create a dedicated directory such as:
+
+```text
+C:\BeamMP-Server\
+```
+
+Install the Microsoft Visual C++ Redistributable required by BeamMP, then download the current official BeamMP Server executable and place it in that folder:
+
+```text
+C:\BeamMP-Server\BeamMP-Server.exe
+```
+
+Run `BeamMP-Server.exe` once. The first startup creates files including:
+
+```text
+ServerConfig.toml
+Server.log
+Resources\
+```
+
+Stop the server after those files are created so you can configure it.
+
+## 5. Linux BeamMP installation
+
+A dedicated location and service account are recommended. This guide uses:
+
+```text
+/opt/beammp/
+```
+
+Create a dedicated service user:
+
+```bash
+sudo useradd \
+  --system \
+  --create-home \
+  --home-dir /opt/beammp \
+  --shell /usr/sbin/nologin \
+  beammpserver
+```
+
+Download the correct current BeamMP Server build for your distribution and architecture. Put it in `/opt/beammp/`. For simpler service files, rename it to:
+
+```text
+BeamMP-Server
+```
+
+Make it executable and set ownership:
+
+```bash
+sudo chmod +x /opt/beammp/BeamMP-Server
+sudo chown -R beammpserver:beammpserver /opt/beammp
+```
+
+Start it once as the dedicated account:
+
+```bash
+sudo -u beammpserver \
+  bash -c 'cd /opt/beammp && ./BeamMP-Server'
+```
+
+Allow the server to create `ServerConfig.toml`, `Server.log`, and `Resources/`, then stop it.
+
+The BeamMP working directory matters because configuration, logs, and Resources are created/read relative to the process working directory.
+
+## 6. Configure `ServerConfig.toml`
+
+Open the generated `ServerConfig.toml`. A practical starting point is:
+
+```toml
+[General]
+Port = 30814
+AuthKey = "YOUR_PRIVATE_BEAMMP_AUTH_KEY"
+AllowGuests = false
+LogChat = false
+Debug = false
+IP = "::"
+Private = false
+InformationPacket = true
+Name = "My BeamMP Server"
+Tags = "Racing,Modded,Community"
+MaxCars = 2
+MaxPlayers = 20
+Map = "/levels/gridmap_v2/info.json"
+Description = "Community BeamMP server"
+ResourceFolder = "Resources"
+```
+
+Important settings:
+
+- `Port`: must match your firewall, router forwarding, and direct-connect port.
+- `AuthKey`: paste your private Keymaster value here.
+- `Private = false`: makes the server eligible for the public list.
+- `Private = true`: use for a private/direct-connect server.
+- `MaxPlayers`: choose according to hardware, mods, vehicles, and network capacity.
+- `MaxCars`: more vehicles can substantially increase load.
+- `Map`: BeamNG level path ending in `/info.json`.
+- `ResourceFolder`: normally leave as `Resources`.
+
+## 7. Network setup
+
+### Home hosting
+
+If users outside your home network will join, forward the selected BeamMP port from the router to the server's LAN IPv4 address.
+
+Default rules:
+
+```text
+External TCP 30814 -> Server IPv4 TCP 30814
+External UDP 30814 -> Server IPv4 UDP 30814
+```
+
+Reserve the server's LAN IP in the router or otherwise keep it stable.
+
+### VPS or dedicated hosting
+
+Normally no home-router port forward is needed, but you still need to allow both TCP and UDP through the host firewall and any provider/cloud firewall.
+
+## 8. Windows Firewall
+
+Create inbound allow rules for:
+
+```text
+TCP 30814
+UDP 30814
+```
+
+You may also allow the BeamMP server executable itself. Do not rely on disabling Windows Firewall; explicit allow rules are preferable.
+
+## 9. Linux firewall
+
+For UFW:
+
+```bash
+sudo ufw allow 30814/tcp
+sudo ufw allow 30814/udp
+sudo ufw status
+```
+
+If your VPS provider has its own firewall/security group, configure the same TCP and UDP port there too.
+
+## 10. Start and validate the vanilla server
+
+Windows:
+
+```text
+BeamMP-Server.exe
+```
+
+Linux:
+
+```bash
+cd /opt/beammp
+sudo -u beammpserver ./BeamMP-Server
+```
+
+Review the console for `[ERROR]` and `[WARN]` lines before adding mods or plugins.
+
+## 11. Joining the server
+
+If BeamMP and the server are on the same PC, Direct Connect to:
+
+```text
+127.0.0.1:30814
+```
+
+From another computer on the same LAN, use the server machine's LAN IPv4 and port.
+
+For external private-server users, use the public IPv4 and configured port. For a public server with `Private = false`, users can normally find it in the BeamMP server list by the configured name.
+
+## 12. Verify public connectivity
+
+Run the server and use BeamMP's official connectivity checker with the public IPv4 and server port. Both TCP and UDP need to succeed.
+
+If TCP works but UDP does not, check the UDP router rule, host firewall, provider firewall, and `ServerConfig.toml` port.
+
+If home hosting cannot receive inbound connections even with correct rules, investigate whether the ISP uses CGNAT. In that case you may need a public IPv4, VPS, or game host.
+
+## 13. Install client-distributed mods
+
+BeamNG mods sent to joining clients belong in:
+
+```text
+Resources/Client/
+```
+
+Example:
+
+```text
+Resources/
+└── Client/
+    ├── race_truck.zip
+    ├── buggy.zip
+    └── support_vehicle.zip
+```
+
+Normal BeamNG mod ZIPs should generally remain zipped. If joining starts failing after new mods are added, remove the latest additions and retest.
+
+## 14. Install a custom map
+
+Put the map ZIP in:
+
+```text
+Resources/Client/
+```
+
+Open the ZIP without extracting it and locate the map folder under `levels/`.
+
+Example ZIP path:
+
+```text
+levels/baja75_desert/
+```
+
+Then configure:
+
+```toml
+Map = "/levels/baja75_desert/info.json"
+```
+
+Restart and test.
+
+## 15. BeamMP 3.x server-side plugin structure
+
+Server-side Lua plugins belong under:
+
+```text
+Resources/Server/
+```
+
+Each plugin needs its own folder, for example:
+
+```text
+Resources/
+└── Server/
+    └── PlayerCounter/
+        └── main.lua
+```
+
+Do not place the PlayerCounter `main.lua` directly in `Resources/Server/`.
+
+BeamMP Server 3.x uses the current Lua 5.3 plugin system and explicit event registration.
+
+## 16. Install PlayerCounter + Retention
+
+Create:
+
+```text
+Resources/Server/PlayerCounter/
+```
+
+Place the plugin at:
+
+```text
+Resources/Server/PlayerCounter/main.lua
+```
+
+On first successful use, the analytics directory is:
+
+```text
+Resources/Server/PlayerCounter/data/
+```
+
+with:
+
+```text
+stats.json
+joins.csv
+```
+
+## 17. Configure PlayerCounter
+
+Open `main.lua` and set the analytics time zone.
+
+UTC:
+
+```lua
+local UTC_OFFSET_HOURS = 0
+```
+
+Philippines / UTC+8:
+
+```lua
+local UTC_OFFSET_HOURS = 8
+```
+
+Choose the reporting time zone before collecting long-term data. Changing it later shifts calendar rollover boundaries.
+
+Recommended guest behavior:
+
+```lua
+local COUNT_GUESTS_AS_UNIQUE = false
+```
+
+Guest sessions can still be counted without treating names as permanent identities.
+
+Enable player chat commands:
+
+```lua
+local ALLOW_PLAYER_COMMANDS = true
+```
+
+Disable them:
+
+```lua
+local ALLOW_PLAYER_COMMANDS = false
+```
+
+## 18. PlayerCounter commands
+
+Player chat commands, when enabled:
+
+```text
+/playerstats
+/retention
+```
+
+Server console commands:
+
+```text
+playerstats
+retention
+```
+
+`playerstats` reports daily, monthly, yearly, and all-time analytics. `retention` reports the current month-over-month retention cohort.
+
+## 19. Metric definitions
+
+A unique player is an authenticated BeamMP account identified by its permanent BeamMP ID.
+
+If one player reconnects 15 times in one day:
+
+```text
+Daily Unique Players: 1
+Daily Join Sessions: 15
+```
+
+The plugin tracks daily, monthly, yearly, and all-time unique players and joins, plus new users, returning users, and retention.
+
+A **new player** is a permanent BeamMP account ID not previously known to the database.
+
+A **returning player** is an already-known player who participates again.
+
+A **retained player** is a player from the immediately previous reporting cohort who returns in the current cohort.
+
+Example:
+
+```text
+July unique players:       400
+July players back in Aug:  160
+Monthly retention:        40.0%
+```
+
+## 20. Install the weekly webhook sender
+
+Create:
+
+```text
+Resources/Server/PlayerCounter/weekly_push.py
+```
+
+The recommended weekly sender performs these steps:
+
+1. Read `joins.csv`.
+2. Determine the most recently completed Monday-Sunday week.
+3. Calculate weekly unique players.
+4. Calculate weekly join sessions.
+5. Calculate new players.
+6. Calculate returning players.
+7. Calculate previous-week retention.
+8. Read current aggregate totals from `stats.json`.
+9. Build JSON.
+10. Sign the exact JSON body with HMAC-SHA256.
+11. POST it to the website over HTTPS.
+
+Keeping outbound HTTP outside BeamMP Lua avoids placing a network request inside BeamMP's synchronous Lua event execution path.
+
+## 21. Recommended webhook payload
+
+```json
+{
+  "server": "Baja75 Series Server #4 NA",
+  "period": {
+    "start": "2026-08-03",
+    "end": "2026-08-09"
+  },
+  "weekly": {
+    "unique_players": 284,
+    "join_sessions": 1328,
+    "guest_joins": 14,
+    "new_players": 72,
+    "returning_players": 212,
+    "retained_players": 146,
+    "previous_week_players": 251,
+    "retention_percent": 58.17
+  },
+  "current": {
+    "month_unique": 381,
+    "year_unique": 2184,
+    "all_time_unique": 3719,
+    "all_time_joins": 31527
+  }
+}
+```
+
+For a public website, send aggregate statistics rather than player names or BeamMP IDs.
+
+## 22. Configure `weekly_push.py`
+
+At minimum:
+
+```python
+SERVER_NAME = "My BeamMP Server"
+WEBHOOK_URL = "https://example.com/api/beammp-weekly"
+WEBHOOK_SECRET = "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET"
+UTC_OFFSET_HOURS = 0
+```
+
+Use the same time-zone offset as PlayerCounter.
+
+For Philippines reporting:
+
+```python
+UTC_OFFSET_HOURS = 8
+```
+
+
+## 23. Webhook security
+
+Use HTTPS and a strong private secret. Do not expose the secret in GitHub, client-side JavaScript, public HTML, screenshots, or Discord.
+
+Recommended signing method:
+
+```text
+HMAC-SHA256
+```
+
+Recommended header:
+
+```text
+X-BeamMP-Signature: <signature>
+```
+
+The website should calculate HMAC-SHA256 over the exact raw request body using its private copy of the same secret. Save the payload only when the signatures match.
+
+Typical HTTP responses:
+
+```text
+200 OK            accepted
+400 Bad Request   malformed payload
+401 Unauthorized  bad signature
+409 Conflict      duplicate week, if duplicates are rejected
+```
+
+## 24. Test the webhook manually
+
+Linux:
+
+```bash
+cd /opt/beammp
+sudo -u beammpserver \
+  python3 Resources/Server/PlayerCounter/weekly_push.py
+```
+
+Windows Command Prompt:
+
+```bat
+cd C:\BeamMP-Server
+python Resources\Server\PlayerCounter\weekly_push.py
+```
+
+PowerShell:
+
+```powershell
+Set-Location C:\BeamMP-Server
+python .\Resources\Server\PlayerCounter\weekly_push.py
+```
+
+Verify that the JSON looks correct, the week dates are right, the site returns HTTP 200, and the website stores the expected record before scheduling automatic delivery.
+
+## 25. Linux: run BeamMP with systemd
+
+Create:
+
+```text
+/etc/systemd/system/beammp.service
+```
+
+```ini
+[Unit]
+Description=BeamMP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=beammpserver
+Group=beammpserver
+WorkingDirectory=/opt/beammp
+ExecStart=/opt/beammp/BeamMP-Server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable beammp.service
+sudo systemctl start beammp.service
+```
+
+Useful commands:
+
+```bash
+systemctl status beammp.service
+sudo systemctl restart beammp.service
+sudo systemctl stop beammp.service
+journalctl -u beammp.service
+journalctl -u beammp.service -f
+```
+
+## 26. Linux: weekly stats scheduler
+
+Create:
+
+```text
+/etc/systemd/system/beammp-weekly-stats.service
+```
+
+```ini
+[Unit]
+Description=Push BeamMP Weekly Player Statistics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=beammpserver
+Group=beammpserver
+WorkingDirectory=/opt/beammp
+ExecStart=/usr/bin/python3 /opt/beammp/Resources/Server/PlayerCounter/weekly_push.py
+```
+
+Create:
+
+```text
+/etc/systemd/system/beammp-weekly-stats.timer
+```
+
+```ini
+[Unit]
+Description=BeamMP Weekly Statistics Timer
+
+[Timer]
+OnCalendar=Mon *-*-* 00:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now beammp-weekly-stats.timer
+```
+
+Check it:
+
+```bash
+systemctl status beammp-weekly-stats.timer
+systemctl list-timers beammp-weekly-stats.timer
+```
+
+Test the push immediately:
+
+```bash
+sudo systemctl start beammp-weekly-stats.service
+journalctl -u beammp-weekly-stats.service
+```
+
+`Persistent=true` lets systemd account for a missed calendar activation after downtime.
+
+## 27. Windows: automatically start BeamMP
+
+Use Task Scheduler.
+
+Create a task named:
+
+```text
+BeamMP Server
+```
+
+Trigger:
+
+```text
+At startup
+```
+
+Program:
+
+```text
+C:\BeamMP-Server\BeamMP-Server.exe
+```
+
+Set **Start in** to:
+
+```text
+C:\BeamMP-Server
+```
+
+The working directory is important because BeamMP resolves its configuration, logs, and Resources from the working directory.
+
+For a dedicated machine, configure the task to run whether the user is logged in or not if appropriate.
+
+## 28. Windows: schedule weekly webhook push
+
+Create another Task Scheduler task:
+
+```text
+BeamMP Weekly Statistics
+```
+
+Trigger:
+
+```text
+Weekly
+Monday
+12:10 AM
+```
+
+Program:
+
+```text
+C:\Path\To\python.exe
+```
+
+Arguments:
+
+```text
+C:\BeamMP-Server\Resources\Server\PlayerCounter\weekly_push.py
+```
+
+Start in:
+
+```text
+C:\BeamMP-Server
+```
+
+Run the task manually once before depending on the schedule.
+
+## 29. Website database recommendation
+
+Store one row per server per completed week. Useful fields:
+
+```text
+server_id
+week_start
+week_end
+unique_players
+join_sessions
+guest_joins
+new_players
+returning_players
+retained_players
+previous_week_players
+retention_percent
+month_unique
+year_unique
+all_time_unique
+all_time_joins
+received_at
+```
+
+A unique constraint on:
+
+```text
+server_id + week_start
+```
+
+prevents accidental duplicate weekly records when a webhook is retried.
+
+## 30. Multi-server deployment
+
+For several BeamMP servers on one Linux host, use separate directories:
+
+```text
+/opt/beammp-server1/
+/opt/beammp-server2/
+/opt/beammp-server3/
+```
+
+Use separate ports, AuthKeys, ServerConfig files, Resources directories, PlayerCounter databases, webhook server identifiers, and service units.
+
+Do not point two running PlayerCounter instances at the same `stats.json` or `joins.csv`.
+
+## 31. Backups
+
+Back up at least:
+
+```text
+ServerConfig.toml
+Resources/Client/
+Resources/Server/
+Resources/Server/PlayerCounter/data/stats.json
+Resources/Server/PlayerCounter/data/joins.csv
+```
+
+Back up before BeamMP updates, plugin updates, map changes, large mod changes, manual JSON edits, or server migrations.
+
+Linux example:
+
+```bash
+sudo systemctl stop beammp.service
+sudo tar -czf \
+  /var/backups/beammp-$(date +%Y-%m-%d).tar.gz \
+  /opt/beammp
+sudo systemctl start beammp.service
+```
+
+## 32. Updating BeamMP Server
+
+Recommended procedure:
+
+1. Announce maintenance.
+2. Stop the server.
+3. Back up the installation.
+4. Download the current BeamMP Server binary.
+5. Replace the old server executable unless the release notes require more changes.
+6. Preserve `ServerConfig.toml` and `Resources/`.
+7. Restore execute permission/ownership on Linux.
+8. Start the server.
+9. Check startup output and version.
+10. Run `playerstats` and `retention`.
+11. Test an external connection.
+
+## 33. Updating PlayerCounter
+
+Use this procedure:
+
+```text
+1. Stop BeamMP
+2. Back up Resources/Server/PlayerCounter/data/
+3. Replace main.lua
+4. Preserve stats.json
+5. Preserve joins.csv
+6. Start BeamMP
+7. Review PlayerCounter console output
+8. Run playerstats
+9. Run retention
+```
+
+Do not delete the `data` folder during a normal upgrade.
+
+## 34. Updating the webhook sender
+
+```text
+1. Back up weekly_push.py
+2. Replace/update the script
+3. Verify webhook URL and secret configuration
+4. Run it manually
+5. Confirm HTTP 200
+6. Confirm the correct website record
+7. Verify the timer/task is still enabled
+```
+
+## 35. Production security checklist
+
+- [ ] AuthKey is not public
+- [ ] Webhook secret is not public
+- [ ] GitHub contains no production secrets
+- [ ] TCP port is allowed
+- [ ] UDP port is allowed
+- [ ] Unneeded ports are closed
+- [ ] Linux server is not running as root
+- [ ] `stats.json` is not publicly downloadable
+- [ ] `joins.csv` is not publicly downloadable
+- [ ] Webhook uses HTTPS
+- [ ] Website verifies HMAC-SHA256
+- [ ] Website validates required JSON fields
+- [ ] Backups are working
+- [ ] BeamMP starts after reboot
+- [ ] Weekly schedule survives reboot
+- [ ] External connectivity has been tested
+- [ ] Current mods have been tested
+- [ ] No unexplained BeamMP startup errors remain
+
+## 36. Privacy recommendation
+
+Keep individual BeamMP IDs and player-specific history on the game server. A public website normally only needs aggregated values such as:
+
+```text
+Weekly unique players
+Join sessions
+New players
+Returning players
+Retention
+Monthly unique players
+Annual unique players
+All-time unique players
+```
+
+Avoid publicly exposing raw `stats.json`, raw `joins.csv`, BeamMP IDs, player-specific join histories, or IP addresses.
+
+## 37. Troubleshooting
+
+### Server does not appear in the public list
+
+Check:
+
+```toml
+Private = false
+```
+
+Then verify the AuthKey, TCP/UDP reachability, Internet access, and startup log. Make sure the same AuthKey is not already being used by another running server.
+
+### Cannot direct-connect
+
+Verify the IP, port, server process, TCP firewall rule, and UDP firewall rule. On the same PC use `127.0.0.1`. On the LAN use the host's LAN IPv4.
+
+### TCP works but UDP fails
+
+Recheck router UDP forwarding, Windows/Linux firewall, provider firewall, and the port in `ServerConfig.toml`.
+
+### Home hosting still fails
+
+Investigate CGNAT. If your ISP does not provide reachable inbound IPv4, use a public IPv4, VPS, or game host.
+
+### PlayerCounter does not load
+
+Verify the exact path:
+
+```text
+Resources/Server/PlayerCounter/main.lua
+```
+
+Restart BeamMP and look for `[PlayerCounter]` messages.
+
+### `/playerstats` does nothing
+
+Check:
+
+```lua
+local ALLOW_PLAYER_COMMANDS = true
+```
+
+Then test the server-console command:
+
+```text
+playerstats
+```
+
+### Reconnect does not increase unique players
+
+That is intentional. One account reconnecting ten times is one unique player and ten join sessions.
+
+### Retention is N/A
+
+This can be expected after a fresh install, migration from an older counter, or when the complete previous cohort is unavailable.
+
+### Weekly webhook fails
+
+Run `weekly_push.py` manually and look for DNS, TLS, HTTP, JSON, or file-path errors.
+
+### HTTP 401
+
+Check the webhook secret, HMAC implementation, signature header, and whether the website verifies the exact raw request body.
+
+### HTTP 404
+
+Check `WEBHOOK_URL`, the site route, and reverse-proxy configuration.
+
+### HTTP 500
+
+The request reached the website but the application failed. Review the website/application logs.
+
+### Linux BeamMP service fails
+
+```bash
+systemctl status beammp.service
+journalctl -u beammp.service
+```
+
+Check the binary path, execute permission, `WorkingDirectory`, service user ownership, and `ServerConfig.toml`/Resources permissions.
+
+### Weekly timer does not run
+
+```bash
+systemctl status beammp-weekly-stats.timer
+systemctl list-timers
+sudo systemctl start beammp-weekly-stats.service
+journalctl -u beammp-weekly-stats.service
+```
+
+## 38. Useful Linux commands
+
+```bash
+systemctl status beammp.service
+sudo systemctl restart beammp.service
+sudo systemctl stop beammp.service
+sudo systemctl start beammp.service
+journalctl -u beammp.service -f
+systemctl status beammp-weekly-stats.timer
+systemctl list-timers
+sudo -u beammpserver python3 /opt/beammp/Resources/Server/PlayerCounter/weekly_push.py
+```
+
+## 39. Final validation checklist
+
+### BeamMP
+
+- [ ] Server starts successfully
+- [ ] `ServerConfig.toml` is loaded
+- [ ] AuthKey is valid
+- [ ] Correct map loads
+- [ ] TCP works
+- [ ] UDP works
+- [ ] External user can connect
+- [ ] Public listing works if intended
+
+### PlayerCounter
+
+- [ ] Plugin loads
+- [ ] `stats.json` exists
+- [ ] `joins.csv` exists
+- [ ] Joining creates a record
+- [ ] Reconnecting increases joins but not daily unique count
+- [ ] `playerstats` works
+- [ ] `retention` works
+
+### Weekly webhook
+
+- [ ] Weekly unique count looks reasonable
+- [ ] Retention is calculated
+- [ ] Database receives the correct row
+- [ ] systemd timer or Windows task is enabled
+- [ ] Scheduled job has been manually tested
+
+## 40. Recommended deployment order
+
+Use this order to isolate problems quickly:
+
+```text
+1. Install BeamMP Server
+2. Configure AuthKey
+3. Configure TCP/UDP networking
+4. Confirm a vanilla server works
+5. Add the intended map
+6. Confirm connection again
+7. Add vehicle/client mods
+8. Confirm connection again
+9. Install PlayerCounter
+10. Confirm playerstats
+11. Confirm joins.csv
+12. Install weekly_push.py
+13. Test the website webhook manually
+14. Configure the weekly scheduler
+15. Enable backups
+```
