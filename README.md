@@ -1,61 +1,34 @@
 # BeamMP PlayerCounter + Retention Analytics
 
 A server-side analytics plugin for BeamMP Server 3.x that tracks unique players, join sessions, new and returning users, and month-over-month player retention using permanent BeamMP account IDs.
-
-File Structure:
-```Resources/
-└── Server/
-    └── PlayerCounter/
-        ├── main.lua
-        └── data/
-            ├── stats.json
-            └── joins.csv
-
-
+   
 **Features**
 
 
-Daily unique players
+- Daily unique players
+- Monthly unique players
+- Yearly unique players
+- All-time unique players
+- Daily, monthly, yearly, and all-time join sessions
+- New player tracking
+- Returning player tracking
+- Month-over-month retention
+- Permanent per-player statistics
+- CSV connection log
+- JSON statistics database
+- Automatic calendar rollover
+- Existing PlayerCounter V1 migration
+- BeamMP connectivity-check filtering
+- Optional in-game statistics commands
+- Server-console statistics commands
 
-Monthly unique players
+## Requirements
 
-Yearly unique players
+- BeamMP Server 3.x
+- Server-side Lua resources enabled
+- Write access to the server's Resources/Server/PlayerCounter/ directory
 
-All-time unique players
-
-Daily, monthly, yearly, and all-time join sessions
-
-New player tracking
-
-Returning player tracking
-
-Month-over-month retention
-
-Permanent per-player statistics
-
-CSV connection log
-
-JSON statistics database
-
-Automatic calendar rollover
-
-Existing PlayerCounter V1 migration
-
-BeamMP connectivity-check filtering
-
-Optional in-game statistics commands
-
-Server-console statistics commands
-
-Requirements
-
-BeamMP Server 3.x
-
-Server-side Lua resources enabled
-
-Write access to the server's Resources/Server/PlayerCounter/ directory
-
-Installation
+## Installation
 
 Create the following directory structure in your BeamMP server:
 
@@ -100,7 +73,7 @@ Existing total join counts are preserved.
 
 Historical retention cannot be reconstructed from the old stats.json if the previous version only stored monthly totals instead of the individual BeamMP IDs that formed each monthly cohort.
 
-As a result:
+### As a result:
 
 Current and all-time statistics are preserved where possible.
 
