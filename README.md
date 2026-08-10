@@ -1,8 +1,18 @@
-BeamMP PlayerCounter + Retention Analytics
+# BeamMP PlayerCounter + Retention Analytics
 
 A server-side analytics plugin for BeamMP Server 3.x that tracks unique players, join sessions, new and returning users, and month-over-month player retention using permanent BeamMP account IDs.
 
-Features
+File Structure:
+Resources/
+└── Server/
+    └── PlayerCounter/
+        ├── main.lua
+        └── data/
+            ├── stats.json
+            └── joins.csv
+            
+**Features**
+
 
 Daily unique players
 
