@@ -1,0 +1,7 @@
+# Secrets and runtime files for the Discord status script
+discord/discord_status.json
+discord/discord_status_state.json
+discord/*.tmp
+
+# Server data if this repo is cloned into a server
+data/
