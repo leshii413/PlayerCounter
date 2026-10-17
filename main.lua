@@ -1,35 +1,53 @@
--- BeamMP Player Counter + Retention Analytics by Leshii413 with Youtube, Reddit & AI assistance.
--- Tracks daily, monthly, yearly and all-time unique users + total joins.
--- Public Config
--- Version 08.10.2026.1600
+-- BeamMP PlayerCounter + Retention Analytics
+-- by Leshii413, with YouTube, Reddit & AI assistance.
+-- Version 2.0.1
+-- License: GPL-3.0 (see LICENSE)
 --
--- Philippines Offset added for myself during creation to allow future timezone changes. Default can be easily changed to your timezone, just change based on your UTC + .or -
+-- Tracks, per BeamMP account ID:
+--   * Daily / monthly / yearly / all-time unique players and join sessions
+--   * New vs returning players
+--   * Month-over-month retention
+--   * Total playtime per player
+--   * A live snapshot of who is online (data/live.json) for dashboards and
+--     the Discord status script (discord_status.py)
 --
--- Tracks:
---   * Daily / monthly / yearly unique authenticated users
---   * Raw join sessions
---   * New vs returning users
---   * Month-over-month retained users and retention rate
---   * All-time unique users and joins
+-- Install: Resources/Server/PlayerCounter/main.lua
+-- Data:    Resources/Server/PlayerCounter/data/   (created automatically)
 --
--- Identity is based on the permanent BeamMP ID returned by
--- MP.GetPlayerIdentifiers(playerID).beammp.
+-- SETTINGS
+-- Settings are stored in data/config.json, which is created on first start
+-- from the defaults below. Edit data/config.json (then restart the server)
+-- so your settings survive future main.lua updates.
+
+local PLUGIN_VERSION = "2.0.1"
 
 local DATA_DIR = "Resources/Server/PlayerCounter/data"
 local STATE_FILE = DATA_DIR .. "/stats.json"
 local JOIN_LOG = DATA_DIR .. "/joins.csv"
+local LIVE_FILE = DATA_DIR .. "/live.json"
+local CONFIG_FILE = DATA_DIR .. "/config.json"
 
--- Analytics calendar offset.
--- 0 = UTC
--- 8 = Philippines (UTC+8)
-local UTC_OFFSET_HOURS = 0
+local DEFAULT_CONFIG = {
+    -- Calendar used for day / month / year rollover. 0 = UTC, 8 = UTC+8 (PH/SG),
+    -- -5 = US Eastern (standard time). Fractions work (5.5 = India).
+    -- Avoid changing this after collecting data: it shifts period boundaries.
+    utc_offset_hours = 0,
 
--- Guests do not have a stable BeamMP account ID.
--- Recommended: false, so they affect join-session counts but not unique-user counts.
-local COUNT_GUESTS_AS_UNIQUE = false
+    -- Guests have no permanent BeamMP ID. false = guests count as join
+    -- sessions but not as unique players (recommended).
+    count_guests_as_unique = false,
 
--- Allow players to use /playerstats and /retention in chat.
-local ALLOW_PLAYER_COMMANDS = true
+    -- Who may use /playerstats, /retention and /playtime in chat:
+    -- "everyone", "admins" (BeamMP IDs listed below) or "off".
+    player_commands = "everyone",
+    admin_beammp_ids = {},
+
+    -- Write data/live.json (online players, playtime, vehicles) this often.
+    live_snapshot = true,
+    live_interval_seconds = 30
+}
+
+local config = {}
 
 local function blankPeriod()
     return {
@@ -38,57 +56,72 @@ local function blankPeriod()
         new_users = {},
         returning_users = {},
         retained_users = {}, -- monthly only; harmless on daily/yearly
-        previous_key = "",  -- monthly only
+        previous_key = "",   -- monthly only
         joins = 0,
         guest_joins = 0
     }
 end
 
-local state = {
-    schema_version = 2,
-    daily = blankPeriod(),
-    monthly = blankPeriod(),
-    yearly = blankPeriod(),
+local function blankState()
+    return {
+        schema_version = 2,
+        plugin_version = PLUGIN_VERSION,
+        daily = blankPeriod(),
+        monthly = blankPeriod(),
+        yearly = blankPeriod(),
 
-    -- ["beammp:123456"] = {
-    --     first_seen = "2026-08-10T05:00:00Z",
-    --     last_seen = "2026-08-10T05:00:00Z",
-    --     first_name = "Player",
-    --     last_name = "Player",
-    --     joins = 1,
-    --     legacy = false
-    -- }
-    players = {},
+        -- ["beammp:123456"] = {
+        --     first_seen = "2026-08-10T05:00:00Z", last_seen = "...",
+        --     first_name = "Player", last_name = "Player",
+        --     joins = 1, playtime_seconds = 0, legacy = false
+        -- }
+        players = {},
+        total_joins = 0,
 
-    total_joins = 0,
+        history = { daily = {}, monthly = {}, yearly = {} },
+        migration = { upgraded_from_v1 = false, upgraded_at = "" },
 
-    history = {
-        daily = {},
-        monthly = {},
-        yearly = {}
-    },
-
-    migration = {
-        upgraded_from_v1 = false,
-        upgraded_at = ""
+        -- Settings that change how stored data is interpreted.
+        recorded_settings = {}
     }
-}
+end
+
+local state = blankState()
+
+-- Live (not persisted) runtime state.
+local ready = false          -- false until onInit loaded data successfully
+local dirty = false          -- state changed since last save
+local lastSaveTime = 0
+local sessions = {}          -- [pid] = { uid, name, guest, beammp, joined, credited }
+local vehicleCache = {}      -- [pid] = { [vid] = { raw = string, info = table } }
+
+local PLAYTIME_SAVE_INTERVAL = 120 -- seconds between saves caused only by playtime
 
 --------------------------------------------------
 -- Utility
 --------------------------------------------------
 
+local function log(message)
+    print("[PlayerCounter] " .. tostring(message))
+end
+
 local function countKeys(tbl)
-    local count = 0
     if type(tbl) ~= "table" then
         return 0
     end
-
+    local count = 0
     for _ in pairs(tbl) do
         count = count + 1
     end
-
     return count
+end
+
+local function int(value)
+    return math.floor(tonumber(value) or 0)
+end
+
+local function trim(text)
+    return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 local function copySet(tbl)
@@ -96,67 +129,70 @@ local function copySet(tbl)
     if type(tbl) ~= "table" then
         return out
     end
-
     for key, value in pairs(tbl) do
         if value then
             out[key] = true
         end
     end
-
     return out
 end
 
+local function now()
+    return os.time()
+end
+
 local function shiftedTime()
-    return os.time() + (UTC_OFFSET_HOURS * 3600)
+    return math.floor(now() + (config.utc_offset_hours or 0) * 3600)
 end
 
 local function periodKeys()
-    local now = shiftedTime()
-
+    local t = shiftedTime()
     return {
-        day = os.date("!%Y-%m-%d", now),
-        month = os.date("!%Y-%m", now),
-        year = os.date("!%Y", now)
+        day = os.date("!%Y-%m-%d", t),
+        month = os.date("!%Y-%m", t),
+        year = os.date("!%Y", t)
     }
 end
 
-local function utcTimestamp()
-    return os.date("!%Y-%m-%dT%H:%M:%SZ")
+local function utcTimestamp(t)
+    return os.date("!%Y-%m-%dT%H:%M:%SZ", t or now())
 end
 
 local function previousMonthKey(monthKey)
     local yearText, monthText = tostring(monthKey):match("^(%d%d%d%d)%-(%d%d)$")
-    if not yearText or not monthText then
+    if not yearText then
         return ""
     end
-
-    local year = tonumber(yearText)
-    local month = tonumber(monthText)
-
-    month = month - 1
+    local year, month = tonumber(yearText), tonumber(monthText) - 1
     if month == 0 then
         month = 12
         year = year - 1
     end
-
     return string.format("%04d-%02d", year, month)
 end
 
-local function csvEscape(value)
-    value = tostring(value or "")
-
+local function csvCell(value)
+    value = tostring(value == nil and "" or value)
     if value:find('[,"\n\r]') then
         value = '"' .. value:gsub('"', '""') .. '"'
     end
-
     return value
+end
+
+-- Player names are chosen by players. A name such as =HYPERLINK(...) would be
+-- run as a formula when joins.csv is opened in Excel/Sheets, so prefix those.
+local function csvTextCell(value)
+    value = tostring(value == nil and "" or value)
+    if value:find("^[=+%-@\t\r]") then
+        value = "'" .. value
+    end
+    return csvCell(value)
 end
 
 local function percent(numerator, denominator)
     if not denominator or denominator <= 0 then
         return nil
     end
-
     return (numerator / denominator) * 100
 end
 
@@ -164,8 +200,171 @@ local function formatPercent(value)
     if value == nil then
         return "N/A"
     end
-
     return string.format("%.1f%%", value)
+end
+
+local function formatDuration(seconds)
+    seconds = math.max(0, int(seconds))
+    local days = seconds // 86400
+    local hours = (seconds % 86400) // 3600
+    local minutes = (seconds % 3600) // 60
+    if days > 0 then
+        return string.format("%dd %dh", days, hours)
+    elseif hours > 0 then
+        return string.format("%dh %02dm", hours, minutes)
+    end
+    return string.format("%dm", minutes)
+end
+
+--------------------------------------------------
+-- Files
+--------------------------------------------------
+
+local function readFile(path)
+    local file = io.open(path, "rb")
+    if not file then
+        return nil
+    end
+    local contents = file:read("a")
+    file:close()
+    return contents
+end
+
+-- Write to path.tmp, keep the previous file as path.bak, then move the new
+-- file into place. A crash mid-write can no longer leave a half-written
+-- stats.json behind.
+local function writeFileAtomic(path, contents, keepBackup)
+    local tmp = path .. ".tmp"
+    local file, openErr = io.open(tmp, "wb")
+    if not file then
+        return false, openErr
+    end
+    local wrote, writeErr = file:write(contents)
+    local closed = file:close()
+    if not wrote or not closed then
+        FS.Remove(tmp)
+        return false, writeErr or "could not finish writing"
+    end
+
+    if FS.Exists(path) then
+        if keepBackup then
+            FS.Remove(path .. ".bak")
+            FS.Rename(path, path .. ".bak")
+        else
+            FS.Remove(path) -- Windows cannot rename over an existing file
+        end
+    end
+
+    local renamed, renameErr = FS.Rename(tmp, path)
+    if not renamed then
+        if keepBackup and not FS.Exists(path) and FS.Exists(path .. ".bak") then
+            FS.Copy(path .. ".bak", path)
+        end
+        return false, renameErr
+    end
+    return true
+end
+
+local function decodeJsonFile(path)
+    if not FS.Exists(path) then
+        return nil, "missing"
+    end
+    local contents = readFile(path)
+    if not contents then
+        return nil, "unreadable"
+    end
+    if contents:match("^%s*$") then
+        return nil, "empty"
+    end
+    local ok, decoded = pcall(Util.JsonDecode, contents)
+    if ok and type(decoded) == "table" then
+        return decoded
+    end
+    return nil, "invalid JSON"
+end
+
+--------------------------------------------------
+-- Config
+--------------------------------------------------
+
+local function applyConfig(loaded)
+    config = {}
+    for key, value in pairs(DEFAULT_CONFIG) do
+        config[key] = value
+    end
+    if type(loaded) == "table" then
+        for key, value in pairs(loaded) do
+            if DEFAULT_CONFIG[key] ~= nil then
+                config[key] = value
+            end
+        end
+        -- Old setting name from earlier versions.
+        if loaded.allow_player_commands == false and loaded.player_commands == nil then
+            config.player_commands = "off"
+        end
+    end
+
+    config.utc_offset_hours = tonumber(config.utc_offset_hours) or 0
+    if config.utc_offset_hours < -12 or config.utc_offset_hours > 14 then
+        log("WARNING: utc_offset_hours " .. config.utc_offset_hours .. " is out of range; using 0.")
+        config.utc_offset_hours = 0
+    end
+    config.count_guests_as_unique = config.count_guests_as_unique == true
+    config.player_commands = tostring(config.player_commands):lower()
+    if config.player_commands ~= "everyone" and config.player_commands ~= "admins"
+        and config.player_commands ~= "off" then
+        log("WARNING: player_commands must be everyone, admins or off; using everyone.")
+        config.player_commands = "everyone"
+    end
+    local admins = {}
+    if type(config.admin_beammp_ids) == "table" then
+        for _, id in pairs(config.admin_beammp_ids) do
+            admins[tostring(id)] = true
+        end
+    end
+    config.admin_set = admins
+    config.live_snapshot = config.live_snapshot ~= false
+    config.live_interval_seconds = math.max(5, int(config.live_interval_seconds))
+end
+
+local function loadConfig()
+    local loaded, err = decodeJsonFile(CONFIG_FILE)
+    if loaded then
+        applyConfig(loaded)
+        return false
+    end
+
+    applyConfig(nil)
+    if err ~= "missing" then
+        log("WARNING: data/config.json is " .. err .. "; using defaults until it is fixed.")
+        return false
+    end
+
+    -- Written by hand so the order is stable and the admin list is a JSON array.
+    local order = { "utc_offset_hours", "count_guests_as_unique", "player_commands",
+        "admin_beammp_ids", "live_snapshot", "live_interval_seconds" }
+    local lines = {}
+    for _, key in ipairs(order) do
+        local value = DEFAULT_CONFIG[key]
+        local text
+        if type(value) == "table" then
+            local items = {}
+            for _, item in ipairs(value) do
+                items[#items + 1] = string.format("%q", tostring(item))
+            end
+            text = "[" .. table.concat(items, ", ") .. "]"
+        elseif type(value) == "string" then
+            text = string.format("%q", value)
+        else
+            text = tostring(value)
+        end
+        lines[#lines + 1] = string.format('    "%s": %s', key, text)
+    end
+    local ok = writeFileAtomic(CONFIG_FILE, "{\n" .. table.concat(lines, ",\n") .. "\n}\n", false)
+    if ok then
+        log("Created data/config.json with default settings.")
+    end
+    return true
 end
 
 --------------------------------------------------
@@ -174,16 +373,14 @@ end
 
 local function normalizePeriod(period)
     period = type(period) == "table" and period or {}
-
-    period.key = period.key or ""
+    period.key = type(period.key) == "string" and period.key or ""
     period.users = type(period.users) == "table" and period.users or {}
     period.new_users = type(period.new_users) == "table" and period.new_users or {}
     period.returning_users = type(period.returning_users) == "table" and period.returning_users or {}
     period.retained_users = type(period.retained_users) == "table" and period.retained_users or {}
-    period.previous_key = period.previous_key or ""
-    period.joins = tonumber(period.joins) or 0
-    period.guest_joins = tonumber(period.guest_joins) or 0
-
+    period.previous_key = type(period.previous_key) == "string" and period.previous_key or ""
+    period.joins = int(period.joins)
+    period.guest_joins = int(period.guest_joins)
     return period
 end
 
@@ -193,44 +390,38 @@ local function normalizeState()
     state.yearly = normalizePeriod(state.yearly)
 
     state.players = type(state.players) == "table" and state.players or {}
-    state.total_joins = tonumber(state.total_joins) or 0
+    state.total_joins = int(state.total_joins)
 
     state.history = type(state.history) == "table" and state.history or {}
-    state.history.daily = type(state.history.daily) == "table" and state.history.daily or {}
-    state.history.monthly = type(state.history.monthly) == "table" and state.history.monthly or {}
-    state.history.yearly = type(state.history.yearly) == "table" and state.history.yearly or {}
+    for _, scope in ipairs({ "daily", "monthly", "yearly" }) do
+        state.history[scope] = type(state.history[scope]) == "table" and state.history[scope] or {}
+    end
 
     state.migration = type(state.migration) == "table" and state.migration or {}
     state.migration.upgraded_from_v1 = state.migration.upgraded_from_v1 == true
     state.migration.upgraded_at = state.migration.upgraded_at or ""
+
+    state.recorded_settings = type(state.recorded_settings) == "table" and state.recorded_settings or {}
+    state.plugin_version = PLUGIN_VERSION
 end
 
 local function migrateV1IfNeeded()
-    -- V1 stored all-time users as: state.all_users[uniqueID] = true
-    -- V2 stores per-player metadata in state.players.
+    -- V1 stored all-time users as state.all_users[uniqueID] = true.
     if type(state.all_users) == "table" then
         for uniqueID, value in pairs(state.all_users) do
             if value and state.players[uniqueID] == nil then
                 state.players[uniqueID] = {
-                    first_seen = "",
-                    last_seen = "",
-                    first_name = "",
-                    last_name = "",
-                    joins = 0,
-                    legacy = true
+                    first_seen = "", last_seen = "", first_name = "", last_name = "",
+                    joins = 0, playtime_seconds = 0, legacy = true
                 }
             end
         end
-
         state.all_users = nil
         state.migration.upgraded_from_v1 = true
         state.migration.upgraded_at = utcTimestamp()
-
-        print("[PlayerCounter] Migrated V1 all-time users to retention schema V2.")
-        print("[PlayerCounter] New/returning classification becomes fully accurate after the next period rollover.")
-        print("[PlayerCounter] Month-over-month retention becomes available after one complete month is captured by V2.")
+        log("Migrated V1 all-time users to retention schema V2.")
+        log("Month-over-month retention becomes available after one complete month is captured.")
     end
-
     state.schema_version = 2
 end
 
@@ -239,78 +430,82 @@ end
 --------------------------------------------------
 
 local function saveState()
-    local encoded = Util.JsonEncode(state)
-    if not encoded then
-        print("[PlayerCounter] ERROR: Could not encode stats state.")
+    if not ready then
         return false
     end
-
-    local file = io.open(STATE_FILE, "w")
-    if not file then
-        print("[PlayerCounter] ERROR: Could not write " .. STATE_FILE)
+    local okEncode, encoded = pcall(Util.JsonEncode, state)
+    if not okEncode or not encoded then
+        log("ERROR: Could not encode statistics: " .. tostring(encoded))
         return false
     end
-
-    file:write(Util.JsonPrettify(encoded))
-    file:close()
+    local ok, err = writeFileAtomic(STATE_FILE, Util.JsonPrettify(encoded), true)
+    if not ok then
+        log("ERROR: Could not write " .. STATE_FILE .. ": " .. tostring(err))
+        return false
+    end
+    dirty = false
+    lastSaveTime = now()
     return true
 end
 
+-- Returns true if a database was loaded (or none existed yet).
 local function loadState()
-    if not FS.Exists(STATE_FILE) then
-        return
+    local mainExists = FS.Exists(STATE_FILE)
+    local loaded, err = decodeJsonFile(STATE_FILE)
+
+    if not loaded and mainExists then
+        -- Never overwrite a damaged database: keep a copy for manual recovery.
+        local corruptCopy = STATE_FILE .. ".corrupt-" .. os.date("!%Y%m%d-%H%M%S", now())
+        FS.Copy(STATE_FILE, corruptCopy)
+        log("WARNING: stats.json is " .. err .. ". A copy was kept as " .. corruptCopy)
+
+        for _, candidate in ipairs({ STATE_FILE .. ".bak", STATE_FILE .. ".tmp" }) do
+            local recovered = decodeJsonFile(candidate)
+            if recovered then
+                loaded = recovered
+                log("Recovered statistics from " .. candidate ..
+                    ". Joins after its last save may be missing.")
+                break
+            end
+        end
+        if not loaded then
+            log("ERROR: No readable backup found. Starting a new database; the damaged file is preserved.")
+        end
+    elseif not loaded then
+        -- Fresh install, or a crash between moving stats.json aside and replacing it.
+        loaded = decodeJsonFile(STATE_FILE .. ".tmp") or decodeJsonFile(STATE_FILE .. ".bak")
+        if loaded then
+            log("Recovered statistics from an interrupted save.")
+        end
     end
 
-    local file = io.open(STATE_FILE, "r")
-    if not file then
-        print("[PlayerCounter] WARNING: Could not open existing stats.json")
-        return
-    end
-
-    local contents = file:read("*a")
-    file:close()
-
-    if contents == "" then
-        return
-    end
-
-    local loaded = Util.JsonDecode(contents)
-    if type(loaded) == "table" then
+    if loaded then
         state = loaded
         normalizeState()
         migrateV1IfNeeded()
         normalizeState()
-        print("[PlayerCounter] Existing statistics loaded.")
+        log("Statistics loaded: " .. countKeys(state.players) .. " known players.")
     else
-        print("[PlayerCounter] WARNING: Could not decode stats.json; starting with in-memory defaults.")
+        state = blankState()
     end
+    return mainExists or loaded ~= nil
 end
 
-local function appendJoinLog(timestamp, day, month, year, beammpID, playerName, isGuest)
+local function appendJoinLog(timestamp, keys, beammpID, playerName, isGuest)
     local exists = FS.Exists(JOIN_LOG)
     local file = io.open(JOIN_LOG, "a")
-
     if not file then
-        print("[PlayerCounter] ERROR: Could not write joins.csv")
+        log("ERROR: Could not write joins.csv")
         return
     end
-
-    -- Keep the V1 CSV format so an existing joins.csv remains compatible.
+    -- Same columns as V1 so existing joins.csv files and tools keep working.
     if not exists then
         file:write("timestamp_utc,date,month,year,beammp_id,player_name,is_guest\n")
     end
-
-    file:write(
-        csvEscape(timestamp) .. "," ..
-        csvEscape(day) .. "," ..
-        csvEscape(month) .. "," ..
-        csvEscape(year) .. "," ..
-        csvEscape(beammpID) .. "," ..
-        csvEscape(playerName) .. "," ..
-        csvEscape(isGuest and "true" or "false") ..
-        "\n"
-    )
-
+    file:write(table.concat({
+        csvCell(timestamp), csvCell(keys.day), csvCell(keys.month), csvCell(keys.year),
+        csvCell(beammpID), csvTextCell(playerName), csvCell(isGuest and "true" or "false")
+    }, ",") .. "\n")
     file:close()
 end
 
@@ -322,24 +517,17 @@ local function monthlyRetentionFor(period)
     if type(period) ~= "table" or period.previous_key == "" then
         return 0, 0, nil
     end
-
     local previous = state.history.monthly[period.previous_key]
     if type(previous) ~= "table" then
         return countKeys(period.retained_users), 0, nil
     end
-
     local previousUsers = tonumber(previous.unique_users) or countKeys(previous.users)
     local retained = countKeys(period.retained_users)
-
-    return retained, previousUsers, percent(retained, previousUsers)
+    return retained, int(previousUsers), percent(retained, previousUsers)
 end
 
-local function archiveDaily(period)
-    if period.key == "" then
-        return
-    end
-
-    state.history.daily[period.key] = {
+local function periodSummary(period)
+    return {
         unique_users = countKeys(period.users),
         joins = period.joins or 0,
         guest_joins = period.guest_joins or 0,
@@ -352,38 +540,15 @@ local function archiveMonthly(period)
     if period.key == "" then
         return
     end
-
+    local record = periodSummary(period)
     local retained, previousUsers, retentionRate = monthlyRetentionFor(period)
-
-    state.history.monthly[period.key] = {
-        unique_users = countKeys(period.users),
-        joins = period.joins or 0,
-        guest_joins = period.guest_joins or 0,
-        new_users = countKeys(period.new_users),
-        returning_users = countKeys(period.returning_users),
-        retained_users = retained,
-        previous_month = period.previous_key or "",
-        previous_month_users = previousUsers,
-        retention_rate = retentionRate,
-
-        -- Membership is retained temporarily so the NEXT month can calculate
-        -- exact month-over-month retention. Older membership sets are pruned.
-        users = copySet(period.users)
-    }
-end
-
-local function archiveYearly(period)
-    if period.key == "" then
-        return
-    end
-
-    state.history.yearly[period.key] = {
-        unique_users = countKeys(period.users),
-        joins = period.joins or 0,
-        guest_joins = period.guest_joins or 0,
-        new_users = countKeys(period.new_users),
-        returning_users = countKeys(period.returning_users)
-    }
+    record.retained_users = retained
+    record.previous_month = period.previous_key or ""
+    record.previous_month_users = previousUsers
+    record.retention_rate = retentionRate
+    -- Kept only until the next month has used it for retention, then pruned.
+    record.users = copySet(period.users)
+    state.history.monthly[period.key] = record
 end
 
 local function resetPeriod(period, newKey)
@@ -398,9 +563,7 @@ local function resetPeriod(period, newKey)
 end
 
 local function pruneOldMonthlyMembership()
-    -- Current retention only needs the immediately previous calendar month's IDs.
     local keepKey = state.monthly.previous_key
-
     for monthKey, record in pairs(state.history.monthly) do
         if monthKey ~= keepKey and type(record) == "table" then
             record.users = nil
@@ -413,7 +576,9 @@ local function updatePeriods()
     local changed = false
 
     if state.daily.key ~= keys.day then
-        archiveDaily(state.daily)
+        if state.daily.key ~= "" then
+            state.history.daily[state.daily.key] = periodSummary(state.daily)
+        end
         resetPeriod(state.daily, keys.day)
         changed = true
     end
@@ -423,23 +588,26 @@ local function updatePeriods()
         resetPeriod(state.monthly, keys.month)
         state.monthly.previous_key = previousMonthKey(keys.month)
 
-        -- If there is no archived immediate previous calendar month with
-        -- membership data, current-month retention is intentionally N/A.
+        -- Without the previous calendar month's membership, retention is N/A.
         local previous = state.history.monthly[state.monthly.previous_key]
         if type(previous) ~= "table" or type(previous.users) ~= "table" then
             state.monthly.previous_key = ""
         end
-
         pruneOldMonthlyMembership()
         changed = true
     end
 
     if state.yearly.key ~= keys.year then
-        archiveYearly(state.yearly)
+        if state.yearly.key ~= "" then
+            state.history.yearly[state.yearly.key] = periodSummary(state.yearly)
+        end
         resetPeriod(state.yearly, keys.year)
         changed = true
     end
 
+    if changed then
+        dirty = true
+    end
     return changed
 end
 
@@ -451,9 +619,7 @@ local function markPeriodUser(period, uniqueID, isNewEver)
     if period.users[uniqueID] then
         return
     end
-
     period.users[uniqueID] = true
-
     if isNewEver then
         period.new_users[uniqueID] = true
     else
@@ -464,136 +630,400 @@ end
 local function markMonthlyRetention(uniqueID)
     local previousKey = state.monthly.previous_key
     if previousKey == "" then
-        return false
+        return
     end
-
     local previous = state.history.monthly[previousKey]
-    if type(previous) ~= "table" or type(previous.users) ~= "table" then
-        return false
-    end
-
-    if previous.users[uniqueID] then
+    if type(previous) == "table" and type(previous.users) == "table" and previous.users[uniqueID] then
         state.monthly.retained_users[uniqueID] = true
-        return true
     end
+end
 
-    return false
+local function playerRecord(uniqueID)
+    local record = state.players[uniqueID]
+    if type(record) ~= "table" then
+        record = {
+            first_seen = "", last_seen = "", first_name = "", last_name = "",
+            joins = 0, playtime_seconds = 0, legacy = true
+        }
+        state.players[uniqueID] = record
+    end
+    return record
+end
+
+--------------------------------------------------
+-- Sessions and playtime
+--------------------------------------------------
+
+local function uniqueIDFor(beammpID, playerName, isGuest)
+    if not isGuest and beammpID and beammpID ~= "" then
+        return "beammp:" .. tostring(beammpID)
+    elseif isGuest and config.count_guests_as_unique then
+        -- Guest names are not permanent identities, so this is approximate.
+        return "guest:" .. tostring(playerName)
+    end
+    return nil
+end
+
+-- Moves elapsed session time into each player's stored playtime.
+local function creditPlaytime()
+    local t = now()
+    for _, session in pairs(sessions) do
+        local elapsed = t - session.credited
+        if elapsed > 0 then
+            if session.uid then
+                local record = playerRecord(session.uid)
+                record.playtime_seconds = int(record.playtime_seconds) + elapsed
+                dirty = true
+            end
+            session.credited = t
+        end
+    end
+end
+
+local function startSession(pid, playerName, beammpID, isGuest, resumed)
+    local t = now()
+    sessions[pid] = {
+        uid = uniqueIDFor(beammpID, playerName, isGuest),
+        name = tostring(playerName),
+        guest = isGuest == true,
+        beammp = beammpID and tostring(beammpID) or nil,
+        joined = t,
+        credited = t,
+        resumed = resumed == true
+    }
+end
+
+local function endSession(pid)
+    if sessions[pid] then
+        creditPlaytime()
+        sessions[pid] = nil
+    end
+    vehicleCache[pid] = nil
+end
+
+local function isCheckBot(name)
+    return name == "CHK_BMP"
+end
+
+-- Keeps sessions in line with who is actually connected (covers hot reloads
+-- and missed disconnect events).
+local function reconcileSessions()
+    local ok, players = pcall(MP.GetPlayers)
+    if not ok or type(players) ~= "table" then
+        return
+    end
+    for pid in pairs(sessions) do
+        if players[pid] == nil then
+            endSession(pid)
+        end
+    end
+    for pid, name in pairs(players) do
+        if sessions[pid] == nil and not isCheckBot(name) then
+            local identifiers = MP.GetPlayerIdentifiers(pid)
+            local beammpID = type(identifiers) == "table" and identifiers.beammp or nil
+            startSession(pid, name, beammpID, MP.IsPlayerGuest(pid), true)
+        end
+    end
+end
+
+--------------------------------------------------
+-- Live snapshot (data/live.json)
+--------------------------------------------------
+
+local function vehicleInfo(raw)
+    if type(raw) ~= "string" then
+        return { model = "unknown" }
+    end
+    local start = raw:find("{", 1, true)
+    if not start then
+        return { model = "unknown" }
+    end
+    local ok, data = pcall(Util.JsonDecode, raw:sub(start))
+    if not ok or type(data) ~= "table" then
+        return { model = "unknown" }
+    end
+    local vcf = type(data.vcf) == "table" and data.vcf or {}
+    local model = data.jbm or vcf.model or vcf.mainPartName or "unknown"
+    local config = nil
+    if type(vcf.partConfigFilename) == "string" then
+        config = vcf.partConfigFilename:match("([^/\\]+)%.pc$")
+    end
+    return { model = tostring(model), config = config }
+end
+
+local function playerVehicles(pid)
+    local list = {}
+    local ok, vehicles = pcall(MP.GetPlayerVehicles, pid)
+    if not ok or type(vehicles) ~= "table" then
+        vehicleCache[pid] = nil
+        return list
+    end
+    local cache = vehicleCache[pid] or {}
+    local fresh = {}
+    for vid, raw in pairs(vehicles) do
+        local cached = cache[vid]
+        local info
+        if cached and cached.raw == raw then
+            info = cached.info
+        else
+            info = vehicleInfo(raw)
+        end
+        fresh[vid] = { raw = raw, info = info }
+        list[#list + 1] = { vid = int(vid), model = info.model, config = info.config }
+    end
+    vehicleCache[pid] = fresh
+    table.sort(list, function(a, b) return a.vid < b.vid end)
+    return list
+end
+
+local function setting(id)
+    local ok, value = pcall(MP.Get, id)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+local function writeLive(serverState)
+    if not config.live_snapshot or not ready then
+        return
+    end
+    local t = now()
+    local players = {}
+    for pid, session in pairs(sessions) do
+        local record = session.uid and state.players[session.uid] or nil
+        local sessionSeconds = t - session.joined
+        local total = nil
+        if record then
+            -- Stored playtime plus the part of this session not yet credited.
+            total = int(record.playtime_seconds) + (t - session.credited)
+        end
+        players[#players + 1] = {
+            pid = pid,
+            name = session.name,
+            beammp_id = session.beammp,
+            guest = session.guest,
+            joined_at = utcTimestamp(session.joined),
+            session_seconds = sessionSeconds,
+            session_resumed = session.resumed,
+            total_playtime_seconds = total,
+            vehicles = serverState == "running" and playerVehicles(pid) or {}
+        }
+    end
+    table.sort(players, function(a, b) return a.session_seconds > b.session_seconds end)
+
+    local map = tostring(setting(MP.Settings.Map) or "")
+    local retained, previousUsers, rate = monthlyRetentionFor(state.monthly)
+    local snapshot = {
+        schema = 1,
+        plugin_version = PLUGIN_VERSION,
+        state = serverState,
+        updated_at = utcTimestamp(t),
+        updated_unix = t,
+        interval_seconds = config.live_interval_seconds,
+        server = {
+            name = tostring(setting(MP.Settings.Name) or ""),
+            map = map:match("/levels/([^/]+)/") or map,
+            max_players = int(setting(MP.Settings.MaxPlayers))
+        },
+        player_count = #players,
+        players = players,
+        stats = {
+            today = periodSummary(state.daily),
+            month = periodSummary(state.monthly),
+            year = periodSummary(state.yearly),
+            retention = {
+                previous_month = state.monthly.previous_key,
+                retained = retained,
+                previous_users = previousUsers,
+                rate = rate
+            },
+            all_time = {
+                unique_users = countKeys(state.players),
+                joins = state.total_joins
+            }
+        }
+    }
+    local ok, encoded = pcall(Util.JsonEncode, snapshot)
+    if ok and encoded then
+        local wrote, err = writeFileAtomic(LIVE_FILE, encoded, false)
+        if not wrote then
+            log("ERROR: Could not write live.json: " .. tostring(err))
+        end
+    end
 end
 
 --------------------------------------------------
 -- Reporting
 --------------------------------------------------
 
-local function currentRetentionData()
+local function retentionText()
     local retained, previousUsers, rate = monthlyRetentionFor(state.monthly)
+    if rate == nil then
+        return "MoM retention: N/A"
+    end
+    return string.format("MoM retention: %d/%d (%s)", retained, previousUsers, formatPercent(rate))
+end
+
+local function periodLine(label, period)
+    return string.format("%s: %d unique, %d new, %d returning, %d joins",
+        label, countKeys(period.users), countKeys(period.new_users),
+        countKeys(period.returning_users), period.joins)
+end
+
+local function statsLines()
     return {
-        previous_key = state.monthly.previous_key,
-        retained = retained,
-        previous_users = previousUsers,
-        rate = rate
+        periodLine("Today", state.daily),
+        periodLine("Month", state.monthly),
+        retentionText(),
+        periodLine("Year", state.yearly),
+        string.format("All-time: %d unique, %d joins", countKeys(state.players), state.total_joins)
     }
 end
 
 local function statsMessage()
-    local retention = currentRetentionData()
+    return table.concat(statsLines(), " | ")
+end
 
-    local retentionText
-    if retention.rate == nil then
-        retentionText = "MoM retention: N/A"
-    else
-        retentionText = string.format(
-            "MoM retention: %d/%d (%s)",
-            retention.retained,
-            retention.previous_users,
-            formatPercent(retention.rate)
-        )
+local function retentionLines()
+    local retained, previousUsers, rate = monthlyRetentionFor(state.monthly)
+    local tail = string.format("Current unique: %d | New: %d | Returning-ever: %d",
+        countKeys(state.monthly.users), countKeys(state.monthly.new_users),
+        countKeys(state.monthly.returning_users))
+    if rate == nil then
+        return {
+            string.format("Retention | Current month: %s | Previous-month cohort unavailable", state.monthly.key),
+            tail
+        }
     end
-
-    return string.format(
-        "Today: %d unique, %d new, %d returning, %d joins | " ..
-        "Month: %d unique, %d new, %d returning, %d joins | " ..
-        "%s | " ..
-        "Year: %d unique, %d new, %d returning, %d joins | " ..
-        "All-time: %d unique, %d joins",
-
-        countKeys(state.daily.users),
-        countKeys(state.daily.new_users),
-        countKeys(state.daily.returning_users),
-        state.daily.joins,
-
-        countKeys(state.monthly.users),
-        countKeys(state.monthly.new_users),
-        countKeys(state.monthly.returning_users),
-        state.monthly.joins,
-
-        retentionText,
-
-        countKeys(state.yearly.users),
-        countKeys(state.yearly.new_users),
-        countKeys(state.yearly.returning_users),
-        state.yearly.joins,
-
-        countKeys(state.players),
-        state.total_joins
-    )
+    return {
+        string.format("Retention | %s -> %s: %d of %d returned (%s)",
+            state.monthly.previous_key, state.monthly.key, retained, previousUsers, formatPercent(rate)),
+        tail
+    }
 end
 
 local function retentionMessage()
-    local retention = currentRetentionData()
+    return table.concat(retentionLines(), " | ")
+end
 
-    if retention.rate == nil then
-        return string.format(
-            "Retention | Current month: %s | Previous-month cohort unavailable | " ..
-            "Current unique: %d | New: %d | Returning-ever: %d",
-            state.monthly.key,
-            countKeys(state.monthly.users),
-            countKeys(state.monthly.new_users),
-            countKeys(state.monthly.returning_users)
-        )
+local function monthReport(monthKey)
+    local record
+    if monthKey == nil or monthKey == "" or monthKey == state.monthly.key then
+        monthKey = state.monthly.key
+        record = periodSummary(state.monthly)
+        local retained, previousUsers, rate = monthlyRetentionFor(state.monthly)
+        record.retained_users, record.previous_month_users, record.retention_rate = retained, previousUsers, rate
+        record.in_progress = true
+    else
+        record = state.history.monthly[monthKey]
+        if type(record) ~= "table" then
+            return "No archived data for " .. tostring(monthKey) .. " (use YYYY-MM)."
+        end
     end
+    local lines = {
+        string.format("PlayerCounter report for %s%s", monthKey, record.in_progress and " (in progress)" or ""),
+        string.format("  Unique players:       %d", int(record.unique_users)),
+        string.format("  New players:          %d", int(record.new_users)),
+        string.format("  Returning players:    %d", int(record.returning_users)),
+        string.format("  Join sessions:        %d", int(record.joins)),
+        string.format("  Guest joins:          %d", int(record.guest_joins)),
+        string.format("  Previous month users: %d", int(record.previous_month_users)),
+        string.format("  Players retained:     %d", int(record.retained_users)),
+        string.format("  Monthly retention:    %s", formatPercent(tonumber(record.retention_rate)))
+    }
+    return table.concat(lines, "\n")
+end
 
-    return string.format(
-        "Retention | %s -> %s: %d of %d returned (%s) | " ..
-        "Current unique: %d | New: %d | Returning-ever: %d",
-        retention.previous_key,
-        state.monthly.key,
-        retention.retained,
-        retention.previous_users,
-        formatPercent(retention.rate),
-        countKeys(state.monthly.users),
-        countKeys(state.monthly.new_users),
-        countKeys(state.monthly.returning_users)
-    )
+local function onlineReport()
+    local lines = {}
+    local t = now()
+    for pid, session in pairs(sessions) do
+        local vehicles = {}
+        for _, v in ipairs(playerVehicles(pid)) do
+            vehicles[#vehicles + 1] = v.config and (v.model .. " (" .. v.config .. ")") or v.model
+        end
+        lines[#lines + 1] = string.format("  [%d] %s | session %s | vehicles: %s",
+            pid, session.name, formatDuration(t - session.joined),
+            #vehicles > 0 and table.concat(vehicles, ", ") or "none")
+    end
+    table.sort(lines)
+    table.insert(lines, 1, string.format("Online: %d player(s)", #lines))
+    return table.concat(lines, "\n")
+end
+
+local function topPlaytimeReport(limit)
+    creditPlaytime()
+    local rows = {}
+    for uid, record in pairs(state.players) do
+        if type(record) == "table" and int(record.playtime_seconds) > 0 then
+            rows[#rows + 1] = { uid = uid, name = record.last_name ~= "" and record.last_name or uid,
+                seconds = int(record.playtime_seconds) }
+        end
+    end
+    table.sort(rows, function(a, b) return a.seconds > b.seconds end)
+    local lines = { "Top playtime (tracked since v2.0.1):" }
+    for i = 1, math.min(limit, #rows) do
+        lines[#lines + 1] = string.format("  %2d. %s - %s", i, rows[i].name, formatDuration(rows[i].seconds))
+    end
+    if #rows == 0 then
+        lines[#lines + 1] = "  No playtime recorded yet."
+    end
+    return table.concat(lines, "\n")
+end
+
+local function playtimeLine(pid)
+    local session = sessions[pid]
+    if not session then
+        return "PlayerCounter: no active session found for you."
+    end
+    local t = now()
+    local text = "Session: " .. formatDuration(t - session.joined)
+    if session.uid and state.players[session.uid] then
+        local record = state.players[session.uid]
+        text = text .. " | Total playtime: " ..
+            formatDuration(int(record.playtime_seconds) + (t - session.credited)) ..
+            " | Joins: " .. int(record.joins)
+    end
+    return text
+end
+
+local function refreshPeriods()
+    if updatePeriods() then
+        saveState()
+    end
 end
 
 --------------------------------------------------
--- Player joins
+-- Player events
 --------------------------------------------------
 
 function PlayerCounter_OnPlayerJoining(playerID)
+    if not ready then
+        return
+    end
     local playerName = MP.GetPlayerName(playerID)
 
-    -- BeamMP connectivity checker / non-player probe.
-    if playerName == "CHK_BMP" then
-        print("[PlayerCounter] Ignoring CHK_BMP server check.")
+    -- BeamMP connectivity checker, not a real player.
+    if isCheckBot(playerName) then
+        log("Ignoring CHK_BMP server check.")
         return
     end
 
     local identifiers = MP.GetPlayerIdentifiers(playerID)
     if type(identifiers) ~= "table" then
-        print("[PlayerCounter] Could not get identifiers for " .. tostring(playerName))
+        log("Could not get identifiers for " .. tostring(playerName))
         return
     end
 
-    local isGuest = MP.IsPlayerGuest(playerID)
-    local periodsChanged = updatePeriods()
+    local isGuest = MP.IsPlayerGuest(playerID) == true
+    updatePeriods()
 
     -- Every real connection counts as a join session, including guests.
     state.daily.joins = state.daily.joins + 1
     state.monthly.joins = state.monthly.joins + 1
     state.yearly.joins = state.yearly.joins + 1
     state.total_joins = state.total_joins + 1
-
     if isGuest then
         state.daily.guest_joins = state.daily.guest_joins + 1
         state.monthly.guest_joins = state.monthly.guest_joins + 1
@@ -601,154 +1031,216 @@ function PlayerCounter_OnPlayerJoining(playerID)
     end
 
     local beammpID = identifiers.beammp
-    local uniqueID = nil
-
-    if not isGuest and beammpID then
-        uniqueID = "beammp:" .. tostring(beammpID)
-    elseif isGuest and COUNT_GUESTS_AS_UNIQUE then
-        -- Guest names are not permanent identities, so this mode is less accurate.
-        uniqueID = "guest:" .. tostring(playerName)
-    end
+    local uniqueID = uniqueIDFor(beammpID, playerName, isGuest)
+    local timestamp = utcTimestamp()
 
     if uniqueID then
         local isNewEver = state.players[uniqueID] == nil
-        local now = utcTimestamp()
-
         if isNewEver then
             state.players[uniqueID] = {
-                first_seen = now,
-                last_seen = now,
-                first_name = tostring(playerName),
-                last_name = tostring(playerName),
-                joins = 1,
-                legacy = false
+                first_seen = timestamp, last_seen = timestamp,
+                first_name = tostring(playerName), last_name = tostring(playerName),
+                joins = 1, playtime_seconds = 0, legacy = false
             }
         else
-            local record = state.players[uniqueID]
-            if type(record) ~= "table" then
-                -- Defensive recovery if an unusual old value survived migration.
-                record = {
-                    first_seen = "",
-                    last_seen = "",
-                    first_name = "",
-                    last_name = "",
-                    joins = 0,
-                    legacy = true
-                }
-                state.players[uniqueID] = record
-            end
-
-            record.last_seen = now
+            local record = playerRecord(uniqueID)
+            record.last_seen = timestamp
             record.last_name = tostring(playerName)
-            record.joins = (tonumber(record.joins) or 0) + 1
+            record.joins = int(record.joins) + 1
         end
-
         markPeriodUser(state.daily, uniqueID, isNewEver)
         markPeriodUser(state.monthly, uniqueID, isNewEver)
         markPeriodUser(state.yearly, uniqueID, isNewEver)
         markMonthlyRetention(uniqueID)
     end
 
-    local keys = periodKeys()
-    appendJoinLog(
-        utcTimestamp(),
-        keys.day,
-        keys.month,
-        keys.year,
-        beammpID or "",
-        playerName,
-        isGuest
-    )
+    if sessions[playerID] then
+        endSession(playerID)
+    end
+    startSession(playerID, playerName, beammpID, isGuest, false)
 
+    appendJoinLog(timestamp, periodKeys(), beammpID or "", playerName, isGuest)
+    dirty = true
     saveState()
+    writeLive("running")
 
-    print(
-        "[PlayerCounter] " .. tostring(playerName) ..
-        " joined | " .. statsMessage()
-    )
+    log(tostring(playerName) .. " joined | " .. statsMessage())
+end
+
+function PlayerCounter_OnPlayerDisconnect(playerID)
+    if not ready or not sessions[playerID] then
+        return
+    end
+    local session = sessions[playerID]
+    endSession(playerID)
+    log(session.name .. " left after " .. formatDuration(now() - session.joined))
+    saveState()
+    writeLive("running")
 end
 
 --------------------------------------------------
 -- Chat commands
 --------------------------------------------------
 
+local function isAdmin(playerID)
+    local identifiers = MP.GetPlayerIdentifiers(playerID)
+    return type(identifiers) == "table" and identifiers.beammp ~= nil
+        and config.admin_set[tostring(identifiers.beammp)] == true
+end
+
+local function sendLines(playerID, lines)
+    for _, line in ipairs(lines) do
+        MP.SendChatMessage(playerID, line)
+    end
+end
+
 function PlayerCounter_OnChatMessage(playerID, playerName, message)
-    if not ALLOW_PLAYER_COMMANDS then
+    local command = trim(message):match("^(/%S+)")
+    if not command then
         return 0
     end
-
-    if message == "/playerstats" then
-        if updatePeriods() then
-            saveState()
-        end
-
-        MP.SendChatMessage(playerID, statsMessage())
+    command = command:lower()
+    if command ~= "/playerstats" and command ~= "/retention" and command ~= "/playtime" then
+        return 0
+    end
+    if not ready or config.player_commands == "off" then
+        return 0
+    end
+    if config.player_commands == "admins" and not isAdmin(playerID) then
+        MP.SendChatMessage(playerID, "PlayerCounter: this command is for server admins.")
         return 1
     end
 
-    if message == "/retention" then
-        if updatePeriods() then
-            saveState()
-        end
-
-        MP.SendChatMessage(playerID, retentionMessage())
-        return 1
+    refreshPeriods()
+    if command == "/playerstats" then
+        sendLines(playerID, statsLines())
+    elseif command == "/retention" then
+        sendLines(playerID, retentionLines())
+    else
+        MP.SendChatMessage(playerID, playtimeLine(playerID))
     end
-
-    return 0
+    return 1
 end
 
 --------------------------------------------------
 -- Server console commands
 --------------------------------------------------
 
-function PlayerCounter_OnConsoleInput(command)
-    if command == "playerstats" then
-        if updatePeriods() then
-            saveState()
-        end
-        return statsMessage()
-    end
+local CONSOLE_HELP = table.concat({
+    "PlayerCounter " .. PLUGIN_VERSION .. " console commands:",
+    "  playerstats / pc.stats        overall analytics",
+    "  retention   / pc.retention    month-over-month retention",
+    "  pc.month [YYYY-MM]            monthly report (current month if omitted)",
+    "  pc.online                     who is online, session time, vehicles",
+    "  pc.top [N]                    top N players by playtime (default 10)",
+    "  pc.save                       save statistics and live.json now"
+}, "\n")
 
-    if command == "retention" then
-        if updatePeriods() then
-            saveState()
-        end
+function PlayerCounter_OnConsoleInput(input)
+    local words = {}
+    for word in trim(input):gmatch("%S+") do
+        words[#words + 1] = word
+    end
+    local command = (words[1] or ""):lower()
+
+    if command == "playerstats" or command == "pc.stats" then
+        refreshPeriods()
+        return statsMessage()
+    elseif command == "retention" or command == "pc.retention" then
+        refreshPeriods()
         return retentionMessage()
+    elseif command == "pc.month" then
+        refreshPeriods()
+        return monthReport(words[2])
+    elseif command == "pc.online" then
+        return onlineReport()
+    elseif command == "pc.top" then
+        return topPlaytimeReport(math.max(1, math.min(50, int(words[2] or 10))))
+    elseif command == "pc.save" then
+        refreshPeriods()
+        creditPlaytime()
+        local ok = saveState()
+        writeLive("running")
+        return ok and "PlayerCounter: saved." or "PlayerCounter: save failed, see errors above."
+    elseif command == "pc.help" or command == "pc" then
+        return CONSOLE_HELP
     end
 end
 
 --------------------------------------------------
--- Initialization / shutdown
+-- Timer, initialization, shutdown
 --------------------------------------------------
 
+function PlayerCounter_OnTick()
+    if not ready then
+        return
+    end
+    updatePeriods()       -- day/month/year rollover even when nobody joins
+    reconcileSessions()
+    creditPlaytime()
+    if dirty and now() - lastSaveTime >= PLAYTIME_SAVE_INTERVAL then
+        saveState()
+    end
+    writeLive("running")
+end
+
 function PlayerCounter_OnInit()
+    if ready then
+        return -- already initialised in this Lua state
+    end
     local success, errorMessage = FS.CreateDirectory(DATA_DIR)
-    if not success then
+    if not success and not FS.IsDirectory(DATA_DIR) then
         print("[PlayerCounter] ERROR: Could not create data directory: " .. tostring(errorMessage))
+        print("[PlayerCounter] Statistics are DISABLED until this is fixed.")
         return
     end
 
+    local hadDatabase = FS.Exists(STATE_FILE)
+    local createdConfig = loadConfig()
     loadState()
-    normalizeState()
-    migrateV1IfNeeded()
-    normalizeState()
 
-    if updatePeriods() then
-        print("[PlayerCounter] Calendar period rollover processed on startup.")
+    -- Warn when the calendar offset differs from the one the data was built with.
+    local recorded = tonumber(state.recorded_settings.utc_offset_hours)
+    if recorded and recorded ~= config.utc_offset_hours then
+        log(string.format("WARNING: utc_offset_hours is %s but this data was collected with %s. " ..
+            "Day/month boundaries will shift. Fix data/config.json if this was not intended.",
+            tostring(config.utc_offset_hours), tostring(recorded)))
+    elseif not recorded and createdConfig and hadDatabase then
+        log("NOTICE: Settings now live in data/config.json (created with utc_offset_hours = " ..
+            tostring(config.utc_offset_hours) .. "). If your previous main.lua used a different " ..
+            "UTC_OFFSET_HOURS, set it in data/config.json and restart.")
     end
+    state.recorded_settings.utc_offset_hours = config.utc_offset_hours
 
+    ready = true
+    if updatePeriods() then
+        log("Calendar period rollover processed on startup.")
+    end
+    reconcileSessions() -- players already online after a hot reload
     saveState()
 
-    print("[PlayerCounter] PlayerCounter + Retention Analytics loaded.")
-    print("[PlayerCounter] " .. statsMessage())
-    print("[PlayerCounter] " .. retentionMessage())
+    MP.RegisterEvent("PlayerCounter_Tick", "PlayerCounter_OnTick")
+    MP.CancelEventTimer("PlayerCounter_Tick")
+    MP.CreateEventTimer("PlayerCounter_Tick", config.live_interval_seconds * 1000)
+    writeLive("running")
+
+    log("PlayerCounter " .. PLUGIN_VERSION .. " loaded (calendar UTC" ..
+        (config.utc_offset_hours >= 0 and "+" or "") .. tostring(config.utc_offset_hours) ..
+        ", player commands: " .. config.player_commands .. "). Type pc.help in the console.")
+    log(statsMessage())
+    log(retentionMessage())
 end
 
 function PlayerCounter_OnShutdown()
+    if not ready then
+        return
+    end
     updatePeriods()
+    creditPlaytime()
     saveState()
-    print("[PlayerCounter] Statistics saved on shutdown.")
+    sessions = {}
+    writeLive("stopped")
+    log("Statistics saved on shutdown.")
 end
 
 --------------------------------------------------
@@ -757,6 +1249,7 @@ end
 
 MP.RegisterEvent("onInit", "PlayerCounter_OnInit")
 MP.RegisterEvent("onPlayerJoining", "PlayerCounter_OnPlayerJoining")
+MP.RegisterEvent("onPlayerDisconnect", "PlayerCounter_OnPlayerDisconnect")
 MP.RegisterEvent("onChatMessage", "PlayerCounter_OnChatMessage")
 MP.RegisterEvent("onConsoleInput", "PlayerCounter_OnConsoleInput")
 MP.RegisterEvent("onShutdown", "PlayerCounter_OnShutdown")

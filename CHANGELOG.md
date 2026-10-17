@@ -1,0 +1,27 @@
+# Changelog
+
+## 2.0.1 (2026-10-07)
+
+### Fixed
+- **Data loss after a crash.** If `stats.json` was cut off mid-write (crash, power loss, full disk), the next start loaded an empty database and saved over the damaged file, wiping all history. Saves are now atomic (`.tmp` then swap), the previous save is kept as `stats.json.bak`, and an unreadable `stats.json` is preserved as `stats.json.corrupt-<date>` while the backup is loaded.
+- **Spreadsheet formula injection in `joins.csv`.** A player named e.g. `=HYPERLINK(...)` became a live formula when the log was opened in Excel or Google Sheets. Such names are now prefixed with `'`.
+- Statistics no longer start if the data folder cannot be created, so a temporary permission problem cannot lead to an empty database being saved.
+- Days with no joins are now archived at midnight by a timer instead of waiting for the next join or command.
+- Console commands with trailing spaces and chat commands with different capitalisation are recognised.
+- Long `/playerstats` replies are split into short lines instead of one line that the chat box truncates.
+
+### Added
+- **Playtime tracking:** per-player total playtime (`playtime_seconds`), saved at least every two minutes while players are online and on disconnect/shutdown. `/playtime` chat command, `pc.top` console command.
+- **Live snapshot** `data/live.json` every 30 s: players online, session time, total playtime, spawned vehicles, server name/map/max players, current stats. Survives hot reloads (sessions are rebuilt from the connected players).
+- **Discord live status** (`discord/discord_status.py`): reads `live.json` from each Pterodactyl server via the client API every 5 minutes and edits one Discord message per server. Handles offline servers, missing/stalled plugin, deleted messages and Discord rate limits; player names can never ping.
+- **`data/config.json`** for settings, so replacing `main.lua` no longer resets the time zone or other options. Warns if the time zone changes after data was collected.
+- `player_commands`: `"everyone"`, `"admins"` (by BeamMP ID) or `"off"`.
+- Console commands `pc.month [YYYY-MM]`, `pc.online`, `pc.top [N]`, `pc.save`, `pc.help` (existing `playerstats` and `retention` still work).
+
+### Compatibility
+- `stats.json` stays schema 2 (fields only added); `joins.csv` columns unchanged.
+- Settings from 2.0.0's `main.lua` are not carried over automatically: copy `UTC_OFFSET_HOURS` etc. into `data/config.json` after the first start.
+
+## 2.0.0
+
+- Retention analytics: new vs returning players, month-over-month retention, per-player records, V1 migration.

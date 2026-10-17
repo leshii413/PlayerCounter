@@ -327,59 +327,54 @@ joins.csv
 
 ## 17. Configure PlayerCounter
 
-Open `main.lua` and set the analytics time zone.
+Start the server once. PlayerCounter creates `Resources/Server/PlayerCounter/data/config.json`:
 
-UTC:
-
-```lua
-local UTC_OFFSET_HOURS = 0
+```json
+{
+    "utc_offset_hours": 0,
+    "count_guests_as_unique": false,
+    "player_commands": "everyone",
+    "admin_beammp_ids": [],
+    "live_snapshot": true,
+    "live_interval_seconds": 30
+}
 ```
 
-Philippines / UTC+8:
+Edit it, then restart BeamMP. Because settings live in `data/`, replacing `main.lua` during an update no longer resets them.
 
-```lua
-local UTC_OFFSET_HOURS = 8
-```
+Set the analytics time zone before collecting long-term data (`0` = UTC, `8` = Philippines / Singapore). Changing it later shifts calendar rollover boundaries; PlayerCounter warns in the console if it changes.
 
-Choose the reporting time zone before collecting long-term data. Changing it later shifts calendar rollover boundaries.
+Keep `count_guests_as_unique` at `false` so guest sessions are counted without treating guest names as permanent identities.
 
-Recommended guest behavior:
-
-```lua
-local COUNT_GUESTS_AS_UNIQUE = false
-```
-
-Guest sessions can still be counted without treating names as permanent identities.
-
-Enable player chat commands:
-
-```lua
-local ALLOW_PLAYER_COMMANDS = true
-```
-
-Disable them:
-
-```lua
-local ALLOW_PLAYER_COMMANDS = false
-```
+`player_commands` controls the chat commands: `"everyone"`, `"admins"` (only the BeamMP IDs in `admin_beammp_ids`, e.g. `["583921"]`), or `"off"`.
 
 ## 18. PlayerCounter commands
 
 Player chat commands, when enabled:
 
 ```text
-/playerstats
-/retention
+/playerstats   overall analytics
+/retention     month-over-month retention
+/playtime      your session time, total playtime and joins
 ```
 
 Server console commands:
 
 ```text
-playerstats
-retention
+playerstats          (or pc.stats)
+retention            (or pc.retention)
+pc.month [YYYY-MM]   monthly report
+pc.online            who is online, session time, vehicles
+pc.top [N]           top players by playtime
+pc.save              save now
+pc.help              list commands
 ```
 
 `playerstats` reports daily, monthly, yearly, and all-time analytics. `retention` reports the current month-over-month retention cohort.
+
+### Discord live status (optional)
+
+PlayerCounter writes `data/live.json` every 30 seconds with the players online, their session and total playtime, and their vehicles. The `discord/discord_status.py` script in the repository reads that file from each of your Pterodactyl servers every 5 minutes and keeps one Discord message per server up to date. See the README section "Discord live status" for setup.
 
 ## 19. Metric definitions
 
@@ -805,13 +800,14 @@ Use this procedure:
 1. Stop BeamMP
 2. Back up Resources/Server/PlayerCounter/data/
 3. Replace main.lua
-4. Preserve stats.json
-5. Preserve joins.csv
-6. Start BeamMP
-7. Review PlayerCounter console output
-8. Run playerstats
-9. Run retention
+4. Preserve stats.json, joins.csv and config.json
+5. Start BeamMP
+6. Review PlayerCounter console output
+7. Run playerstats
+8. Run retention
 ```
+
+Upgrading from 2.0.0: your old settings were inside `main.lua`. The first 2.0.1 start creates `data/config.json` with defaults, so copy your old `UTC_OFFSET_HOURS` (and the other settings) into it and restart.
 
 Do not delete the `data` folder during a normal upgrade.
 
@@ -901,10 +897,10 @@ Restart BeamMP and look for `[PlayerCounter]` messages.
 
 ### `/playerstats` does nothing
 
-Check:
+Check that `data/config.json` has:
 
-```lua
-local ALLOW_PLAYER_COMMANDS = true
+```json
+"player_commands": "everyone"
 ```
 
 Then test the server-console command:

@@ -1,0 +1,3 @@
+{"panel_url":"http://127.0.0.1:8765","api_key":"ptlc_test","webhook_url":"http://127.0.0.1:8765/api/webhooks/1/tok",
+ "servers":[{"id":"aaaa","name":"^l^4Baja75 ^7#4 NA","connect":"203.0.113.10:30814"},{"id":"bbbb","name":"Offline Srv"},
+ {"id":"cccc","name":"No Plugin"},{"id":"dddd","name":"Stale"},{"id":"denied","name":"Denied"}]}
