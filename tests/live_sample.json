@@ -606,5 +606,48 @@
   }
  },
  "updated_at": "2026-10-12T00:00:00Z",
- "updated_unix": 1791763200
+ "updated_unix": 1791763200,
+ "calendar_utc_offset_hours": 8,
+ "leaderboard": {
+  "month_key": "2026-10",
+  "all_time": [
+   {
+    "name": "Leshii413",
+    "beammp_id": "583921",
+    "playtime_seconds": 126380,
+    "joins": 212,
+    "last_seen": "2026-10-12T04:31:12Z"
+   },
+   {
+    "name": "Hilly_*Racing*",
+    "beammp_id": "774125",
+    "playtime_seconds": 122600,
+    "joins": 180,
+    "last_seen": "2026-10-12T05:35:00Z"
+   },
+   {
+    "name": "DustDevil",
+    "beammp_id": "9001",
+    "playtime_seconds": 64000,
+    "joins": 75,
+    "last_seen": "2026-10-10T20:00:00Z"
+   }
+  ],
+  "month": [
+   {
+    "name": "Hilly_*Racing*",
+    "beammp_id": "774125",
+    "playtime_seconds": 36000,
+    "joins": 40,
+    "last_seen": "2026-10-12T05:35:00Z"
+   },
+   {
+    "name": "Leshii413",
+    "beammp_id": "583921",
+    "playtime_seconds": 30100,
+    "joins": 35,
+    "last_seen": "2026-10-12T04:31:12Z"
+   }
+  ]
+ }
 }

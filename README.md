@@ -13,6 +13,7 @@ A server-side analytics plugin for **BeamMP Server 3.x**. It tracks unique playe
 - **Live snapshot** (`data/live.json`) of who is online: name, session time, playtime, AFK, the vehicle they are driving or watching
 - **Discord live status** for one or many Pterodactyl servers, refreshed every 5 minutes, with a 24-hour player graph (`discord/`)
 - Optional tiny **client mod** that reports which vehicle each player is actually in (`client/`)
+- **Stats website** for shared hosting (e.g. `stats.baja75series.org`): live players, graphs, heatmap, numbers and playtime leaderboards per server and across all servers (`web/`)
 - Crash-safe storage: atomic saves, automatic `.bak`, recovery from a damaged `stats.json`
 - Raw connection log (`joins.csv`) safe to open in Excel / Google Sheets
 - Settings in `data/config.json`, so updating `main.lua` keeps them
@@ -23,7 +24,8 @@ A server-side analytics plugin for **BeamMP Server 3.x**. It tracks unique playe
 
 - BeamMP Server 3.x
 - Write access to `Resources/Server/PlayerCounter/`
-- For Discord status (optional): Python 3.8+ anywhere that can reach your panel and Discord
+- For Discord status and the website (optional): Python 3.8+ anywhere that can reach your panel, Discord and the website
+- For the website (optional): PHP 7.4+ hosting with `.htaccess` support (Namecheap shared hosting works)
 
 ## Installation
 
@@ -86,7 +88,8 @@ A successful start prints:
     "live_interval_seconds": 30,
     "afk_detection": true,
     "afk_after_seconds": 300,
-    "afk_move_meters": 5
+    "afk_move_meters": 5,
+    "leaderboard_size": 25
 }
 ```
 
@@ -101,6 +104,7 @@ A successful start prints:
 | `afk_detection` | Stop counting playtime while a player is AFK. |
 | `afk_after_seconds` | A player is AFK when none of their vehicles moved `afk_move_meters` for this long (minimum 60). Players with no vehicle spawned (spectating, in menus) are never marked AFK. |
 | `afk_move_meters` | Movement smaller than this counts as standing still. |
+| `leaderboard_size` | Players in each playtime leaderboard written to `live.json` for the website (all-time and this month). `0` = none. |
 
 ## Commands
 
@@ -113,7 +117,7 @@ A successful start prints:
 | | `pc.online` | Who is online, session time, AFK, vehicle driven or watched |
 | | `pc.peak` | Peak and average players online today, this month, this year |
 | | `pc.heatmap` | Busiest hours of the week this month, as a 7 × 24 text grid |
-| | `pc.top [N]` | Top N players by playtime (default 10) |
+| | `pc.top [N] [month]` | Top N players by playtime (default 10); add `month` for this month only |
 | | `pc.save` | Save immediately |
 | | `pc.help` | List console commands |
 
@@ -226,7 +230,15 @@ Useful if you want your own website or bot to read it:
 }
 ```
 
+`leaderboard` (2.1.0) has `month_key`, `all_time` and `month`: lists of `{name, beammp_id, playtime_seconds, joins, last_seen}`, longest playtime first. `calendar_utc_offset_hours` is the configured calendar.
+
 `online_24h.values` holds the most players online in each 5-minute bucket, oldest first; `-1` means the server wasn't running. `heatmap` uses the configured calendar. `active_vehicle` is present only with the client mod. `state` becomes `"stopped"` on a clean shutdown. An empty list may appear as `{}` (BeamMP's JSON encoder), so treat `{}` as an empty list.
+
+## Stats website
+
+`web/` is a small PHP site for ordinary shared hosting, set up for `stats.baja75series.org`. The Discord status script sends each server's stats to it every 5 minutes, signed with a shared secret. The page shows each server as a race plate with its player count, then for every server: who's on (vehicle, session, playtime, AFK), the 24-hour graph, the weekday-hour heatmap, today / month / year / all-time numbers, and seat-time leaderboards. A series leaderboard adds up the same BeamMP account across all servers. BeamMP IDs are never published.
+
+Step-by-step setup for Namecheap (subdomain, SSL, upload, secret, checks): **[web/README.md](web/README.md)**.
 
 ## Statistic definitions
 

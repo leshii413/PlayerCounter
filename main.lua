@@ -52,7 +52,11 @@ local DEFAULT_CONFIG = {
     -- Players with no vehicle spawned (spectating, menus) are not marked AFK.
     afk_detection = true,
     afk_after_seconds = 300,
-    afk_move_meters = 5
+    afk_move_meters = 5,
+
+    -- Players listed in each playtime leaderboard in live.json (all-time and
+    -- this month), used by the stats website. 0 = no leaderboards.
+    leaderboard_size = 25
 }
 
 local HEAT_SLOTS = 168         -- 7 weekdays x 24 hours
@@ -357,6 +361,7 @@ local function applyConfig(loaded)
     config.afk_detection = config.afk_detection ~= false
     config.afk_after_seconds = math.max(60, int(config.afk_after_seconds))
     config.afk_move_meters = math.max(0.5, tonumber(config.afk_move_meters) or 5)
+    config.leaderboard_size = math.max(0, math.min(100, int(config.leaderboard_size)))
 end
 
 local function loadConfig()
@@ -375,7 +380,7 @@ local function loadConfig()
     -- Written by hand so the order is stable and the admin list is a JSON array.
     local order = { "utc_offset_hours", "count_guests_as_unique", "player_commands",
         "admin_beammp_ids", "live_snapshot", "live_interval_seconds",
-        "afk_detection", "afk_after_seconds", "afk_move_meters" }
+        "afk_detection", "afk_after_seconds", "afk_move_meters", "leaderboard_size" }
     local lines = {}
     for _, key in ipairs(order) do
         local value = DEFAULT_CONFIG[key]
@@ -755,8 +760,11 @@ end
 -- AFK goes to afk_seconds instead, so playtime means time actually playing.
 local function creditPlaytime()
     local t = now()
+    -- Credits normally cover one tick. A longer gap means the server was frozen
+    -- or the clock jumped, so at most three intervals are counted.
+    local cap = (config.live_interval_seconds or 30) * 3
     for _, session in pairs(sessions) do
-        local elapsed = t - session.credited
+        local elapsed = math.min(t - session.credited, cap)
         if elapsed > 0 then
             if session.afk then
                 session.afk_seconds = session.afk_seconds + elapsed
@@ -767,6 +775,12 @@ local function creditPlaytime()
                     record.afk_seconds = int(record.afk_seconds) + elapsed
                 else
                     record.playtime_seconds = int(record.playtime_seconds) + elapsed
+                    -- Playtime this calendar month, for the monthly leaderboard.
+                    if record.month_key ~= state.monthly.key then
+                        record.month_key = state.monthly.key
+                        record.month_playtime_seconds = 0
+                    end
+                    record.month_playtime_seconds = int(record.month_playtime_seconds) + elapsed
                 end
                 dirty = true
             end
@@ -1082,6 +1096,42 @@ local function setting(id)
     return nil
 end
 
+-- Top players by playtime. scope "all" = all-time, "month" = this calendar
+-- month. Entries carry the BeamMP ID so the stats website can merge the same
+-- player across servers; the website never shows it.
+local function leaderboard(scope, limit)
+    local rows = {}
+    for uid, record in pairs(state.players) do
+        if type(record) == "table" then
+            local seconds
+            if scope == "month" then
+                seconds = record.month_key == state.monthly.key and int(record.month_playtime_seconds) or 0
+            else
+                seconds = int(record.playtime_seconds)
+            end
+            if seconds > 0 then
+                rows[#rows + 1] = {
+                    name = record.last_name ~= "" and record.last_name or uid,
+                    beammp_id = uid:match("^beammp:(.+)$"),
+                    playtime_seconds = seconds,
+                    joins = int(record.joins),
+                    last_seen = record.last_seen or ""
+                }
+            end
+        end
+    end
+    table.sort(rows, function(a, b)
+        if a.playtime_seconds ~= b.playtime_seconds then
+            return a.playtime_seconds > b.playtime_seconds
+        end
+        return a.name < b.name
+    end)
+    for i = #rows, limit + 1, -1 do
+        rows[i] = nil
+    end
+    return rows
+end
+
 local function writeLive(serverState)
     if not config.live_snapshot or not ready then
         return
@@ -1135,6 +1185,7 @@ local function writeLive(serverState)
         updated_at = utcTimestamp(t),
         updated_unix = t,
         interval_seconds = config.live_interval_seconds,
+        calendar_utc_offset_hours = config.utc_offset_hours, -- day/month/heatmap calendar
         server = {
             name = tostring(setting(MP.Settings.Name) or ""),
             map = map:match("/levels/([^/]+)/") or map,
@@ -1158,6 +1209,11 @@ local function writeLive(serverState)
             },
             joins_24h = #state.recent_joins
         },
+        leaderboard = config.leaderboard_size > 0 and {
+            month_key = state.monthly.key,
+            all_time = leaderboard("all", config.leaderboard_size),
+            month = leaderboard("month", config.leaderboard_size)
+        } or nil,
         -- Max players online per 5-minute bucket, oldest first; -1 = no data.
         online_24h = {
             bucket_seconds = ONLINE_BUCKET,
@@ -1359,19 +1415,13 @@ local function onlineReport()
     return table.concat(lines, "\n")
 end
 
-local function topPlaytimeReport(limit)
+local function topPlaytimeReport(limit, scope)
     creditPlaytime()
-    local rows = {}
-    for uid, record in pairs(state.players) do
-        if type(record) == "table" and int(record.playtime_seconds) > 0 then
-            rows[#rows + 1] = { uid = uid, name = record.last_name ~= "" and record.last_name or uid,
-                seconds = int(record.playtime_seconds) }
-        end
-    end
-    table.sort(rows, function(a, b) return a.seconds > b.seconds end)
-    local lines = { "Top playtime (tracked since v2.0.1):" }
-    for i = 1, math.min(limit, #rows) do
-        lines[#lines + 1] = string.format("  %2d. %s - %s", i, rows[i].name, formatDuration(rows[i].seconds))
+    local rows = leaderboard(scope, limit)
+    local lines = { scope == "month" and ("Top playtime in " .. state.monthly.key .. ":")
+        or "Top playtime (tracked since v2.0.1):" }
+    for i, row in ipairs(rows) do
+        lines[#lines + 1] = string.format("  %2d. %s - %s", i, row.name, formatDuration(row.playtime_seconds))
     end
     if #rows == 0 then
         lines[#lines + 1] = "  No playtime recorded yet."
@@ -1574,7 +1624,7 @@ local CONSOLE_HELP = table.concat({
     "  pc.online                     who is online, session time, AFK, vehicles",
     "  pc.peak                       peak and average players online",
     "  pc.heatmap                    busiest hours of the week this month",
-    "  pc.top [N]                    top N players by playtime (default 10)",
+    "  pc.top [N] [month]            top N players by playtime (default 10; month = this month)",
     "  pc.save                       save statistics and live.json now"
 }, "\n")
 
@@ -1603,7 +1653,13 @@ function PlayerCounter_OnConsoleInput(input)
         refreshPeriods()
         return heatmapReport()
     elseif command == "pc.top" then
-        return topPlaytimeReport(math.max(1, math.min(50, int(words[2] or 10))))
+        local count, scope = words[2], words[3]
+        if count and not tonumber(count) then
+            count, scope = nil, count -- "pc.top month"
+        end
+        refreshPeriods()
+        return topPlaytimeReport(math.max(1, math.min(50, int(count or 10))),
+            (scope or ""):lower() == "month" and "month" or "all")
     elseif command == "pc.save" then
         refreshPeriods()
         creditPlaytime()

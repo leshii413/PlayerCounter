@@ -31,6 +31,7 @@ License: GPL-3.0, part of https://github.com/leshii413/PlayerCounter
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -59,6 +60,8 @@ DEFAULTS = {
     "show_beammp_ids": False,
     "show_stats": True,
     "show_graph": True,
+    "website_url": "",
+    "website_secret": "",
     "max_players_listed": 30,
     "webhook_username": "Server Status",
     "webhook_avatar_url": "",
@@ -134,6 +137,7 @@ def load_config(path):
     cfg.update({k: v for k, v in loaded.items() if not k.startswith("_")})
     cfg["api_key"] = os.environ.get("PTERODACTYL_API_KEY") or cfg["api_key"]
     cfg["webhook_url"] = os.environ.get("DISCORD_WEBHOOK_URL") or cfg["webhook_url"]
+    cfg["website_secret"] = os.environ.get("PLAYERCOUNTER_WEBSITE_SECRET") or cfg["website_secret"]
     cfg["panel_url"] = str(cfg["panel_url"]).rstrip("/")
     cfg["interval_seconds"] = max(60, int(cfg["interval_seconds"]))
 
@@ -147,8 +151,15 @@ def load_config(path):
     for i, server in enumerate(cfg["servers"]):
         if not server.get("id") and not server.get("live_json_file"):
             problems.append(f"servers[{i}] needs \"id\" (Pterodactyl server id) or \"live_json_file\"")
-        if not (server.get("webhook_url") or cfg["webhook_url"]):
-            problems.append(f"servers[{i}] has no webhook_url and there is no global webhook_url")
+        if not (server.get("webhook_url") or cfg["webhook_url"] or cfg["website_url"]):
+            problems.append(f"servers[{i}] has no webhook_url and there is no global webhook_url or website_url")
+        if server.get("site_key") and not re.match(r"^[a-z0-9][a-z0-9_-]{0,39}$", str(server["site_key"])):
+            problems.append(f"servers[{i}].site_key must be 1-40 characters: a-z, 0-9, _ or -")
+    if cfg["website_url"]:
+        if not str(cfg["website_url"]).startswith(("https://", "http://127.0.0.1", "http://localhost")):
+            problems.append("website_url must start with https:// (the secret signs uploads, but the data itself should not travel unencrypted)")
+        if len(str(cfg["website_secret"])) < 24 or "CHANGE_ME" in str(cfg["website_secret"]):
+            problems.append("website_secret (or PLAYERCOUNTER_WEBSITE_SECRET) must be the same long secret as in the website's config.php")
     if any(s.get("id") for s in cfg["servers"]):
         if not cfg["panel_url"]:
             problems.append("panel_url is required for Pterodactyl servers")
@@ -648,16 +659,65 @@ def discord_send(webhook_url, payload, message_id, image=None):
 
 
 # --------------------------------------------------------------------------
+# Stats website (web/ in the repository, e.g. stats.baja75series.org)
+# --------------------------------------------------------------------------
+
+def site_key(server):
+    """Stable short id for the website: site_key, else derived from id or name."""
+    if server.get("site_key"):
+        return str(server["site_key"])
+    raw = str(server.get("id") or server.get("name") or server.get("live_json_file") or "server").lower()
+    key = re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-_")[:40]
+    return key or "server"
+
+
+def website_push(cfg, server, fetched, order):
+    """POST one server's state to ingest.php, signed with HMAC-SHA256 over
+    "<timestamp>.<body>". Player data goes as-is (BeamMP IDs let the site merge
+    the same player across servers); the site never publishes the IDs."""
+    payload = {
+        "server": {"key": site_key(server), "name": server.get("name") or "", "connect": server.get("connect") or "",
+                   "order": order},
+        "panel_state": fetched.get("panel_state"),
+        "error": fetched.get("error"),
+        "uptime_ms": fetched.get("uptime_ms"),
+        "live": fetched.get("live") if isinstance(fetched.get("live"), dict) else None,
+    }
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    timestamp = str(int(time.time()))
+    signature = hmac.new(str(cfg["website_secret"]).encode("utf-8"), timestamp.encode() + b"." + body,
+                         hashlib.sha256).hexdigest()
+    headers = {"X-PlayerCounter-Timestamp": timestamp, "X-PlayerCounter-Signature": "sha256=" + signature}
+    try:
+        http("POST", cfg["website_url"], headers=headers, raw=body, content_type="application/json")
+    except HttpError as exc:
+        try:
+            reason = json.loads(exc.body).get("error") or exc.body[:200]
+        except (ValueError, AttributeError):
+            reason = exc.body[:200]
+        raise RuntimeError(f"website rejected the upload ({exc.status}): {reason}")
+
+
+# --------------------------------------------------------------------------
 # Main loop
 # --------------------------------------------------------------------------
 
 def refresh(cfg, state, state_path, dry_run):
     now = int(time.time())
     messages = state.setdefault("messages", {})
-    for server in cfg["servers"]:
+    for order, server in enumerate(cfg["servers"]):
         label = clean_name(server.get("name") or server.get("id") or server.get("live_json_file"))
         try:
             fetched = fetch_server(cfg, server)
+            if cfg["website_url"] and not dry_run:
+                try:
+                    website_push(cfg, server, fetched, order)
+                except Exception as exc:  # the website being down must not stop Discord updates
+                    log(f"{label}: website update failed: {exc}")
+            webhook_url = server.get("webhook_url") or cfg["webhook_url"]
+            if not webhook_url and not dry_run:
+                log(f"{label}: website updated (no Discord webhook set)")
+                continue
             embed = build_embed(cfg, server, fetched, now)
             payload = {
                 "embeds": [embed],
@@ -686,7 +746,6 @@ def refresh(cfg, state, state_path, dry_run):
                     print(f"(graph written to {out})")
                 continue
 
-            webhook_url = server.get("webhook_url") or cfg["webhook_url"]
             key = message_key(webhook_url, server)
             new_id = discord_send(webhook_url, payload, messages.get(key), image)
             if new_id != messages.get(key):

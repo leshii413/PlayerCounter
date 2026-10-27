@@ -13,11 +13,16 @@
   "webhook_username": "Server Status",
   "webhook_avatar_url": "",
 
+  "_website": "Optional stats website (web/ folder), e.g. https://stats.baja75series.org/ingest.php. Same secret as the site's config.php. Leave website_url empty to skip.",
+  "website_url": "",
+  "website_secret": "",
+
   "servers": [
     {
       "id": "1a2b3c4d",
       "name": "Baja75 Series #1 NA",
-      "connect": "203.0.113.10:30814"
+      "connect": "203.0.113.10:30814",
+      "site_key": "na1"
     },
     {
       "id": "5e6f7a8b",

@@ -162,6 +162,41 @@ expect(july and july.peak_online == 2 and july.heat_online ~= nil, "July archive
 local rep = console("pc.month 2026-07")
 expect(rep:find("Peak players online:  2", 1, true), "pc.month shows peak:\n" .. rep)
 
+------------------------------------------------------------------ leaderboards
+print("== leaderboards")
+os.execute("rm -rf " .. D)
+T = realTime({ year = 2026, month = 8, day = 30, hour = 12, min = 0, sec = 0 })
+errors(); boot()
+local p1 = S:join("Ana", { beammp = "21" })
+local p2 = S:join("Ben", { beammp = "22" })
+local g1 = S:join("guest77", { guest = true, beammp = "" })
+step(20)                                            -- 10 min each
+S:leave(p2)
+step(20)                                            -- Ana 20 min, Ben 10 min
+snap = live()
+local lb = snap.leaderboard
+expect(lb and lb.month_key == "2026-08", "leaderboard for this month")
+expect(#lb.all_time == 2 and lb.all_time[1].name == "Ana" and lb.all_time[1].playtime_seconds == 1200
+    and lb.all_time[2].name == "Ben" and lb.all_time[2].playtime_seconds == 600, "all-time order and seconds")
+expect(lb.all_time[1].beammp_id == "21" and lb.all_time[1].joins == 1, "entries carry id and joins")
+expect(#lb.month == 2 and lb.month[1].playtime_seconds == 1200, "month board matches in the first month")
+-- The clock jumps ~1.5 days (server frozen / clock change): only 3 ticks
+-- (90 s) may be credited, and that lands in September after the rollover.
+T = realTime({ year = 2026, month = 9, day = 1, hour = 0, min = 0, sec = 0 }) - 30
+step(1)                                             -- first tick in September
+step(10)                                            -- Ana plays 5 more min in September
+lb = live().leaderboard
+expect(lb.month_key == "2026-09" and #lb.month == 1 and lb.month[1].name == "Ana"
+    and lb.month[1].playtime_seconds == 390, "September board: 90 s capped gap + 300 s, got " ..
+    tostring(lb.month[1] and lb.month[1].playtime_seconds))
+expect(lb.all_time[1].playtime_seconds == 1590, "all-time 1200 + 390, got " .. tostring(lb.all_time[1].playtime_seconds))
+expect(console("pc.top month"):find("Top playtime in 2026-09", 1, true)
+    and console("pc.top month"):find("Ana - 6m", 1, true), "pc.top month: " .. console("pc.top month"))
+expect(console("pc.top 1"):find("1. Ana", 1, true) and not console("pc.top 1"):find("Ben", 1, true), "pc.top N limits")
+local cf2 = io.open(D .. "/config.json", "w"); cf2:write('{"leaderboard_size": 0}'); cf2:close()
+S:trigger("onShutdown"); errors(); boot(); step(1)
+expect(live().leaderboard == nil, "leaderboard_size 0 turns it off")
+
 ------------------------------------------------------------------ AFK off
 print("== afk_detection off")
 local cf = io.open(D .. "/config.json", "w"); cf:write('{"afk_detection": false}'); cf:close()

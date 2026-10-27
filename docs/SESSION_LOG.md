@@ -105,3 +105,23 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 - Tests: new `tests/plugin_test_21.lua` (40 checks), `tests/client_test.lua` (7, LuaJIT), runner now runs every `plugin_test*.lua`, fake Discord parses multipart and the e2e test asserts graphs. Results: 45/45, 40/40, 7/7, Discord e2e OK. Three test-side mistakes fixed on the way (old 5-line expectation, AFK switching-tick arithmetic, Lua pattern `-` in `find`); no plugin bugs found.
 - README, CHANGELOG (2.1.0), Full Installation Guide (client mod, AFK settings, new commands), HANDOFF updated.
 - Pushed branch `playercounter-2.1` and opened PR #3 (base `playercounter-2.0.1`); mirrored HANDOFF and this log to the Project.
+
+### Prompt 9 (2026-10-27 11:47)
+
+> i would like for this to work with a subdomain on namecheap via baja75series.org
+> stats.baja75series.org can be the subdomain if it permits me to make one
+
+**Asked** (two multiple-choice questions) and the owner answered:
+- Where is baja75series.org hosted? → **Namecheap shared hosting**
+- What should the public page show? → **Everything + leaderboards** (live players, graphs, plus top playtime per server and across the series)
+
+**Found**: Namecheap allows subdomains (up to 800 per domain on BasicDNS; with Namecheap hosting DNS they are created in cPanel) and auto-installs a free SSL certificate for a new subdomain on shared hosting for the first year.
+
+**Decided**: D21–D26 in HANDOFF.md (PHP + JSON site on Namecheap; the Discord script pushes signed uploads; IDs used only for merging; playtime credit cap; website inside 2.1.0 / PR #3; race-plate design).
+
+**Done**
+- Plugin: `leaderboard_size` (25), `month_playtime_seconds`, `leaderboard` + `calendar_utc_offset_hours` in live.json, `pc.top [N] [month]`, playtime credit capped at 3 intervals (a leaderboard test showed a clock jump crediting 1.5 days). Old test clock changed to tick every 30 s (it jumped an hour at once, which the cap now treats as a frozen server).
+- `web/`: `ingest.php` (signed uploads), `api.php` (public JSON, IDs stripped, series merge), `index.html`/`style.css`/`app.js` (race-plate page), `.htaccess` protection, `config.sample.php`, `web/README.md` Namecheap guide.
+- `discord_status.py`: `website_url`, `website_secret`/`PLAYERCOUNTER_WEBSITE_SECRET`, `site_key`; website-only mode without a webhook.
+- Tests: plugin 45/45 + 49/49, client 7/7, Discord e2e OK, new `tests/run_web_test.sh` 20/20 OK. Screenshots (desktop, mobile, dark): fixed an empty numbers table on offline servers, a repeated error message, small chart labels, the footer rule, inline styles blocked by the CSP, and mid-word name breaks on mobile (rows now stack).
+- Pushed to `playercounter-2.1` (PR #3 updated) and mirrored HANDOFF and this log to the Project.

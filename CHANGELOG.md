@@ -11,11 +11,16 @@
 - **Optional client mod** (`client/`, `playercounter.zip` in `Resources/Client/`): reports the vehicle a player is driving or watching. The server accepts only vehicles that exist. `live.json` gains `active_vehicle` and an `active` flag on the vehicle list.
 - **Discord status:** a 24-hour player graph (PNG drawn by the script, attached to the message) with the peak time as a Discord timestamp; player lines show the vehicle being driven, "watching <player>", and an AFK marker; Today field shows the peak. `show_graph` setting.
 - Console `pc.peak`; `pc.online` shows AFK and the vehicle being driven or watched.
-- Tests: `tests/plugin_test_21.lua` (40 checks) and `tests/client_test.lua` (7 checks, LuaJIT).
+- **Stats website** (`web/`): PHP site for shared hosting (Namecheap-ready, e.g. `stats.baja75series.org`) with race-plate server overview, live players, 24 h graph, heatmap, numbers, per-server and series-wide playtime leaderboards (the same BeamMP account merged across servers). Signed uploads (HMAC-SHA256, 5-minute window, replay protection); BeamMP IDs never published; `.htaccess` blocks settings and data. Setup guide in `web/README.md`.
+- **Discord script** uploads every server to the website (`website_url`, `website_secret` / `PLAYERCOUNTER_WEBSITE_SECRET`, per-server `site_key`); works with or without a Discord webhook.
+- **Leaderboards** in `live.json` (`leaderboard_size`, default 25): all-time and this-month playtime; players now also track `month_playtime_seconds`. `pc.top [N] [month]`.
+- `live.json` carries `calendar_utc_offset_hours`.
+- Tests: `tests/plugin_test_21.lua` (49 checks), `tests/client_test.lua` (7 checks, LuaJIT), `tests/run_web_test.sh` (20 checks: content, privacy, merging, forged/old/replayed uploads).
 
 ### Changed
 - `live.json` schema 1 → 2 (fields added only; readers of schema 1 keep working).
 - Playtime excludes AFK time from 2.1.0 on.
+- A single playtime credit is capped at three timer intervals, so a frozen server or a clock jump can no longer add hours of playtime.
 - `/playerstats` starts with an "Online now / Peak today / Peak this month / Joins last 24h" line (6 lines).
 
 ### Compatibility
