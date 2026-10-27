@@ -12,3 +12,6 @@ web/public/config.php
 web/public/data/*.json
 web/public/data/*.lock
 web/public/data/*.tmp
+
+# Owner deployment packages (contain the secret)
+deploy-out/

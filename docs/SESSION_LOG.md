@@ -227,3 +227,27 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 - Docs aligned with visitor-local times (README, CHANGELOG, web/README, SETUP-INSTRUCTIONS.md).
 - Rebuilt the public release `PlayerCounter-2.1.0.zip` (plugin, client mod, Discord script, website with config.sample.php; verified it contains no secret). PR #3 description rewritten to cover all of 2.1.0.
 - Not done (needs the owner): merging PR #2 then PR #3 into `main` and tagging v2.0.1 / v2.1.0; live tests of the client mod and the Discord script.
+
+### Prompt 22 (2026-10-27 14:26)
+
+> I want what vehicle a player is using to be included, such as Trackfab Apache is the model name in game for the TrackfabLightBuggy
+
+**Started**: checked how to get in-game names; confirmed in BeamMP's client source (`MPVehicleGE.lua`) that `core_vehicles.getModelList().models[<model key>]` is the game's model registry. No files were changed.
+
+### Prompt 23 (2026-10-27 14:28, interrupting)
+
+(screenshot of the live site's "Who's on" table: `Leshii413 | TrackfabLightBuggy (DesertRacingSoloLimited) | 2m | 4h 45m`)
+
+> it shows it nevermind
+
+**Done**: stopped; nothing changed. The idea and its plan are kept as optional open item 7 in HANDOFF.md.
+
+### Prompt 24 (2026-10-27 14:33)
+
+> push updated files and handoff notes to repo for other claude to take over work
+
+**Done**
+- `tools/build_deploy_zips.sh`: rebuilds the owner's two private zips from the repo (secret via `PC_SECRET`, never stored; generates a new one if absent). Verified it reproduces the delivered zips file for file. `deploy-out/` git-ignored.
+- `docs/SETUP-INSTRUCTIONS.md`: copy of the owner-facing upload steps (no secret).
+- HANDOFF.md: new §0 "Taking over? Start here", live deployment notes (site live, server uploading, what the owner's screenshots confirmed), open items updated (live setup done; in-game vehicle names kept as optional with the API plan).
+- Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log to the claude.ai Project.
