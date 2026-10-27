@@ -1,0 +1,35 @@
+{
+  "_readme": "Copy to discord_status.json and fill in. Keys starting with _ are ignored.",
+
+  "panel_url": "https://panel.example.com",
+  "api_key": "ptlc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "webhook_url": "https://discord.com/api/webhooks/123456789012345678/xxxxxxxxxxxxxxxxxxxxxxxx",
+
+  "interval_seconds": 300,
+  "stale_after_seconds": 180,
+  "show_beammp_ids": false,
+  "show_stats": true,
+  "max_players_listed": 30,
+  "webhook_username": "Server Status",
+  "webhook_avatar_url": "",
+
+  "servers": [
+    {
+      "id": "1a2b3c4d",
+      "name": "Baja75 Series #1 NA",
+      "connect": "203.0.113.10:30814"
+    },
+    {
+      "id": "5e6f7a8b",
+      "name": "Baja75 Series #2 EU",
+      "connect": "203.0.113.20:30815",
+      "_comment": "Optional per-server overrides:",
+      "_webhook_url": "https://discord.com/api/webhooks/.../...",
+      "_live_json_path": "/Resources/Server/PlayerCounter/data/live.json"
+    }
+  ],
+
+  "vehicle_names": {
+    "_example_mod_trophy_truck": "Baja Trophy Truck"
+  }
+}
