@@ -5,3 +5,4 @@ discord/*.tmp
 
 # Server data if this repo is cloned into a server
 data/
+client/playercounter.zip

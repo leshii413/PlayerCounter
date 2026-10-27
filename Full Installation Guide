@@ -325,6 +325,8 @@ stats.json
 joins.csv
 ```
 
+Optional: copy `playercounter.zip` (built from the repository's `client/` folder with `client/build_zip.sh`) to `Resources/Client/`. Players download it automatically; it lets the live status show the vehicle each player is actually driving.
+
 ## 17. Configure PlayerCounter
 
 Start the server once. PlayerCounter creates `Resources/Server/PlayerCounter/data/config.json`:
@@ -336,7 +338,10 @@ Start the server once. PlayerCounter creates `Resources/Server/PlayerCounter/dat
     "player_commands": "everyone",
     "admin_beammp_ids": [],
     "live_snapshot": true,
-    "live_interval_seconds": 30
+    "live_interval_seconds": 30,
+    "afk_detection": true,
+    "afk_after_seconds": 300,
+    "afk_move_meters": 5
 }
 ```
 
@@ -345,6 +350,8 @@ Edit it, then restart BeamMP. Because settings live in `data/`, replacing `main.
 Set the analytics time zone before collecting long-term data (`0` = UTC, `8` = Philippines / Singapore). Changing it later shifts calendar rollover boundaries; PlayerCounter warns in the console if it changes.
 
 Keep `count_guests_as_unique` at `false` so guest sessions are counted without treating guest names as permanent identities.
+
+AFK settings: a player whose vehicles haven't moved `afk_move_meters` for `afk_after_seconds` stops earning playtime until they move again. Raise `afk_after_seconds` if your events have long waits on the start line.
 
 `player_commands` controls the chat commands: `"everyone"`, `"admins"` (only the BeamMP IDs in `admin_beammp_ids`, e.g. `["583921"]`), or `"off"`.
 
@@ -366,6 +373,8 @@ retention            (or pc.retention)
 pc.month [YYYY-MM]   monthly report
 pc.online            who is online, session time, vehicles
 pc.top [N]           top players by playtime
+pc.peak              peak and average players online
+pc.heatmap           busiest hours of the week
 pc.save              save now
 pc.help              list commands
 ```

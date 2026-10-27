@@ -1,13 +1,14 @@
 -- BeamMP PlayerCounter + Retention Analytics
 -- by Leshii413, with YouTube, Reddit & AI assistance.
--- Version 2.0.1
+-- Version 2.1.0
 -- License: GPL-3.0 (see LICENSE)
 --
 -- Tracks, per BeamMP account ID:
 --   * Daily / monthly / yearly / all-time unique players and join sessions
 --   * New vs returning players
 --   * Month-over-month retention
---   * Total playtime per player
+--   * Playtime per player (AFK time excluded)
+--   * Peak and average players online, weekday-hour heatmap, 24 h graph
 --   * A live snapshot of who is online (data/live.json) for dashboards and
 --     the Discord status script (discord_status.py)
 --
@@ -19,7 +20,7 @@
 -- from the defaults below. Edit data/config.json (then restart the server)
 -- so your settings survive future main.lua updates.
 
-local PLUGIN_VERSION = "2.0.1"
+local PLUGIN_VERSION = "2.1.0"
 
 local DATA_DIR = "Resources/Server/PlayerCounter/data"
 local STATE_FILE = DATA_DIR .. "/stats.json"
@@ -44,8 +45,20 @@ local DEFAULT_CONFIG = {
 
     -- Write data/live.json (online players, playtime, vehicles) this often.
     live_snapshot = true,
-    live_interval_seconds = 30
+    live_interval_seconds = 30,
+
+    -- AFK: a player whose vehicles have not moved afk_move_meters in
+    -- afk_after_seconds stops earning playtime until they move again.
+    -- Players with no vehicle spawned (spectating, menus) are not marked AFK.
+    afk_detection = true,
+    afk_after_seconds = 300,
+    afk_move_meters = 5
 }
+
+local HEAT_SLOTS = 168         -- 7 weekdays x 24 hours
+local ONLINE_BUCKET = 300      -- 24 h player graph: one value per 5 minutes
+local ONLINE_BUCKETS = 288
+local ACTIVE_VEHICLE_EVENT = "PlayerCounter_activeVehicle"
 
 local config = {}
 
@@ -58,7 +71,14 @@ local function blankPeriod()
         retained_users = {}, -- monthly only; harmless on daily/yearly
         previous_key = "",   -- monthly only
         joins = 0,
-        guest_joins = 0
+        guest_joins = 0,
+        -- Concurrency (2.1): players online, sampled every tick.
+        peak_online = 0,
+        peak_at = "",
+        online_seconds = 0,  -- sum of players online x seconds
+        sampled_seconds = 0, -- seconds the plugin was running in this period
+        heat_online = nil,   -- monthly only: 168 weekday-hour slots
+        heat_sampled = nil
     }
 end
 
@@ -82,7 +102,12 @@ local function blankState()
         migration = { upgraded_from_v1 = false, upgraded_at = "" },
 
         -- Settings that change how stored data is interpreted.
-        recorded_settings = {}
+        recorded_settings = {},
+
+        -- 2.1: unix times of joins in the last 24 h, and the 24 h player graph
+        -- (max players online per 5-minute bucket, -1 = server not running).
+        recent_joins = {},
+        online_24h = { last_bucket = 0, values = {} }
     }
 end
 
@@ -92,7 +117,11 @@ local state = blankState()
 local ready = false          -- false until onInit loaded data successfully
 local dirty = false          -- state changed since last save
 local lastSaveTime = 0
-local sessions = {}          -- [pid] = { uid, name, guest, beammp, joined, credited }
+local sessions = {}          -- [pid] = { uid, name, guest, beammp, joined, credited,
+                             --           afk, idle, last_pos, active }
+local lastSample = nil       -- unix time of the last concurrency sample
+local lastTick = nil         -- unix time of the last timer tick (AFK checks)
+local vehicleInfo            -- defined in the live snapshot section
 local vehicleCache = {}      -- [pid] = { [vid] = { raw = string, info = table } }
 
 local PLAYTIME_SAVE_INTERVAL = 120 -- seconds between saves caused only by playtime
@@ -325,6 +354,9 @@ local function applyConfig(loaded)
     config.admin_set = admins
     config.live_snapshot = config.live_snapshot ~= false
     config.live_interval_seconds = math.max(5, int(config.live_interval_seconds))
+    config.afk_detection = config.afk_detection ~= false
+    config.afk_after_seconds = math.max(60, int(config.afk_after_seconds))
+    config.afk_move_meters = math.max(0.5, tonumber(config.afk_move_meters) or 5)
 end
 
 local function loadConfig()
@@ -342,7 +374,8 @@ local function loadConfig()
 
     -- Written by hand so the order is stable and the admin list is a JSON array.
     local order = { "utc_offset_hours", "count_guests_as_unique", "player_commands",
-        "admin_beammp_ids", "live_snapshot", "live_interval_seconds" }
+        "admin_beammp_ids", "live_snapshot", "live_interval_seconds",
+        "afk_detection", "afk_after_seconds", "afk_move_meters" }
     local lines = {}
     for _, key in ipairs(order) do
         local value = DEFAULT_CONFIG[key]
@@ -381,7 +414,27 @@ local function normalizePeriod(period)
     period.previous_key = type(period.previous_key) == "string" and period.previous_key or ""
     period.joins = int(period.joins)
     period.guest_joins = int(period.guest_joins)
+    period.peak_online = int(period.peak_online)
+    period.peak_at = type(period.peak_at) == "string" and period.peak_at or ""
+    period.online_seconds = tonumber(period.online_seconds) or 0
+    period.sampled_seconds = tonumber(period.sampled_seconds) or 0
     return period
+end
+
+-- A JSON array may come back as a table with string or missing keys; rebuild
+-- a dense numeric array of the given length.
+local function denseArray(value, length, fill)
+    local out = {}
+    local source = type(value) == "table" and value or {}
+    for i = 1, length do
+        out[i] = tonumber(source[i]) or tonumber(source[tostring(i)]) or fill
+    end
+    return out
+end
+
+local function normalizeHeat(period)
+    period.heat_online = denseArray(period.heat_online, HEAT_SLOTS, 0)
+    period.heat_sampled = denseArray(period.heat_sampled, HEAT_SLOTS, 0)
 end
 
 local function normalizeState()
@@ -403,6 +456,23 @@ local function normalizeState()
 
     state.recorded_settings = type(state.recorded_settings) == "table" and state.recorded_settings or {}
     state.plugin_version = PLUGIN_VERSION
+
+    normalizeHeat(state.monthly)
+    local joins = {}
+    if type(state.recent_joins) == "table" then
+        for _, t in pairs(state.recent_joins) do
+            if tonumber(t) then
+                joins[#joins + 1] = math.floor(tonumber(t))
+            end
+        end
+        table.sort(joins)
+    end
+    state.recent_joins = joins
+    local graph = type(state.online_24h) == "table" and state.online_24h or {}
+    state.online_24h = {
+        last_bucket = int(graph.last_bucket),
+        values = denseArray(graph.values, int(graph.last_bucket) > 0 and ONLINE_BUCKETS or 0, -1)
+    }
 end
 
 local function migrateV1IfNeeded()
@@ -532,7 +602,11 @@ local function periodSummary(period)
         joins = period.joins or 0,
         guest_joins = period.guest_joins or 0,
         new_users = countKeys(period.new_users),
-        returning_users = countKeys(period.returning_users)
+        returning_users = countKeys(period.returning_users),
+        peak_online = period.peak_online or 0,
+        peak_at = period.peak_at or "",
+        avg_online = period.sampled_seconds and period.sampled_seconds > 0
+            and math.floor(period.online_seconds / period.sampled_seconds * 100 + 0.5) / 100 or 0
     }
 end
 
@@ -546,8 +620,10 @@ local function archiveMonthly(period)
     record.previous_month = period.previous_key or ""
     record.previous_month_users = previousUsers
     record.retention_rate = retentionRate
-    -- Kept only until the next month has used it for retention, then pruned.
+    -- Kept only until the next month has used them (retention, heatmap), then pruned.
     record.users = copySet(period.users)
+    record.heat_online = period.heat_online
+    record.heat_sampled = period.heat_sampled
     state.history.monthly[period.key] = record
 end
 
@@ -560,6 +636,15 @@ local function resetPeriod(period, newKey)
     period.previous_key = ""
     period.joins = 0
     period.guest_joins = 0
+    period.peak_online = 0
+    period.peak_at = ""
+    period.online_seconds = 0
+    period.sampled_seconds = 0
+    if period.heat_online then
+        period.heat_online = nil
+        period.heat_sampled = nil
+        normalizeHeat(period)
+    end
 end
 
 local function pruneOldMonthlyMembership()
@@ -567,6 +652,8 @@ local function pruneOldMonthlyMembership()
     for monthKey, record in pairs(state.history.monthly) do
         if monthKey ~= keepKey and type(record) == "table" then
             record.users = nil
+            record.heat_online = nil
+            record.heat_sampled = nil
         end
     end
 end
@@ -664,15 +751,23 @@ local function uniqueIDFor(beammpID, playerName, isGuest)
     return nil
 end
 
--- Moves elapsed session time into each player's stored playtime.
+-- Moves elapsed session time into each player's stored playtime. Time spent
+-- AFK goes to afk_seconds instead, so playtime means time actually playing.
 local function creditPlaytime()
     local t = now()
     for _, session in pairs(sessions) do
         local elapsed = t - session.credited
         if elapsed > 0 then
+            if session.afk then
+                session.afk_seconds = session.afk_seconds + elapsed
+            end
             if session.uid then
                 local record = playerRecord(session.uid)
-                record.playtime_seconds = int(record.playtime_seconds) + elapsed
+                if session.afk then
+                    record.afk_seconds = int(record.afk_seconds) + elapsed
+                else
+                    record.playtime_seconds = int(record.playtime_seconds) + elapsed
+                end
                 dirty = true
             end
             session.credited = t
@@ -689,7 +784,12 @@ local function startSession(pid, playerName, beammpID, isGuest, resumed)
         beammp = beammpID and tostring(beammpID) or nil,
         joined = t,
         credited = t,
-        resumed = resumed == true
+        resumed = resumed == true,
+        afk = false,
+        idle = 0,            -- seconds without moving
+        afk_seconds = 0,     -- AFK time in this session
+        last_pos = {},       -- [vid] = { x, y, z }
+        active = nil         -- { owner = pid, vid = n } reported by the client mod
     }
 end
 
@@ -703,6 +803,204 @@ end
 
 local function isCheckBot(name)
     return name == "CHK_BMP"
+end
+
+--------------------------------------------------
+-- Concurrency: peaks, averages, heatmap, 24 h graph
+--------------------------------------------------
+
+local function onlineCount()
+    return countKeys(sessions)
+end
+
+local function heatSlot()
+    local d = os.date("!*t", shiftedTime())
+    return (d.wday - 1) * 24 + d.hour + 1 -- 1 = Sunday 00:00, 168 = Saturday 23:00
+end
+
+local function notePeak(period, count, timestamp)
+    if count > (period.peak_online or 0) then
+        period.peak_online = count
+        period.peak_at = timestamp
+        dirty = true
+    end
+end
+
+local function notePeaks(count)
+    local timestamp = utcTimestamp()
+    notePeak(state.daily, count, timestamp)
+    notePeak(state.monthly, count, timestamp)
+    notePeak(state.yearly, count, timestamp)
+end
+
+-- Records the largest player count seen in the current 5-minute bucket.
+-- Buckets the server was not running for stay at -1 (a gap in the graph).
+local function noteGraph(count)
+    local graph = state.online_24h
+    local bucket = now() // ONLINE_BUCKET
+    if graph.last_bucket <= 0 or #graph.values ~= ONLINE_BUCKETS then
+        graph.values = denseArray(nil, ONLINE_BUCKETS, -1)
+        graph.last_bucket = bucket
+    elseif bucket > graph.last_bucket then
+        local shift = math.min(ONLINE_BUCKETS, bucket - graph.last_bucket)
+        for _ = 1, shift do
+            table.remove(graph.values, 1)
+            graph.values[#graph.values + 1] = -1
+        end
+        graph.last_bucket = bucket
+    elseif bucket < graph.last_bucket then
+        return -- clock went backwards; ignore until it catches up
+    end
+    if count > graph.values[ONLINE_BUCKETS] then
+        graph.values[ONLINE_BUCKETS] = count
+    end
+end
+
+local function pruneRecentJoins()
+    local cutoff = now() - 86400
+    local joins = state.recent_joins
+    local first = 1
+    while joins[first] and joins[first] <= cutoff do
+        first = first + 1
+    end
+    if first > 1 then
+        table.move(joins, first, #joins + first - 1, 1)
+        for i = #joins, #joins - first + 2, -1 do
+            joins[i] = nil
+        end
+    end
+end
+
+-- Adds the time since the last sample to the averages and heatmap. Gaps longer
+-- than three intervals (server frozen or stopped) are not counted.
+local function sampleOnline()
+    local t = now()
+    local count = onlineCount()
+    if not state.monthly.heat_online then
+        normalizeHeat(state.monthly)
+    end
+    if lastSample then
+        local dt = t - lastSample
+        if dt > 0 and dt <= config.live_interval_seconds * 3 then
+            for _, period in ipairs({ state.daily, state.monthly, state.yearly }) do
+                period.online_seconds = period.online_seconds + count * dt
+                period.sampled_seconds = period.sampled_seconds + dt
+            end
+            local slot = heatSlot()
+            state.monthly.heat_online[slot] = state.monthly.heat_online[slot] + count * dt
+            state.monthly.heat_sampled[slot] = state.monthly.heat_sampled[slot] + dt
+            dirty = true
+        end
+    end
+    lastSample = t
+    notePeaks(count)
+    noteGraph(count)
+    pruneRecentJoins()
+end
+
+--------------------------------------------------
+-- AFK detection
+--------------------------------------------------
+
+local function vehiclePosition(pid, vid)
+    local ok, raw, err = pcall(MP.GetPositionRaw, pid, vid)
+    if not ok or type(raw) ~= "table" or (err ~= nil and err ~= "") then
+        return nil
+    end
+    local pos = raw.pos
+    if type(pos) ~= "table" then
+        return nil
+    end
+    local x, y, z = tonumber(pos[1] or pos.x), tonumber(pos[2] or pos.y), tonumber(pos[3] or pos.z)
+    if not x or not y or not z then
+        return nil
+    end
+    return { x, y, z }
+end
+
+-- Marks players AFK when none of their vehicles moved afk_move_meters since
+-- the last check for afk_after_seconds. Called before playtime is credited.
+local function updateAfk(dt)
+    if not config.afk_detection then
+        return
+    end
+    local limit = config.afk_move_meters * config.afk_move_meters
+    for pid, session in pairs(sessions) do
+        local ok, vehicles = pcall(MP.GetPlayerVehicles, pid)
+        local moved, any = false, false
+        local seen = {}
+        if ok and type(vehicles) == "table" then
+            for vid in pairs(vehicles) do
+                local pos = vehiclePosition(pid, vid)
+                if pos then
+                    any = true
+                    seen[vid] = true
+                    local last = session.last_pos[vid]
+                    if not last then
+                        moved = true -- new vehicle: count as activity
+                    else
+                        local dx, dy, dz = pos[1] - last[1], pos[2] - last[2], pos[3] - last[3]
+                        if dx * dx + dy * dy + dz * dz >= limit then
+                            moved = true
+                        end
+                    end
+                    session.last_pos[vid] = pos
+                end
+            end
+        end
+        for vid in pairs(session.last_pos) do
+            if not seen[vid] then
+                session.last_pos[vid] = nil
+            end
+        end
+
+        if moved or not any then
+            -- Moving, or no vehicle to judge (spectating / in menus).
+            if session.afk then
+                log(session.name .. " is back from AFK")
+            end
+            session.idle = 0
+            session.afk = false
+        else
+            session.idle = session.idle + dt
+            if not session.afk and session.idle >= config.afk_after_seconds then
+                session.afk = true
+                log(session.name .. " is AFK (no movement for " .. formatDuration(session.idle) .. ")")
+            end
+        end
+    end
+end
+
+--------------------------------------------------
+-- Active vehicle (reported by the optional PlayerCounter client mod)
+--------------------------------------------------
+
+-- Returns { owner, owner_name, vid, model, config, own } for the vehicle the
+-- player is driving or watching, or nil when unknown or no longer valid.
+local function activeVehicleFor(pid, session)
+    local active = session.active
+    if not active then
+        return nil
+    end
+    local ok, vehicles = pcall(MP.GetPlayerVehicles, active.owner)
+    if not ok or type(vehicles) ~= "table" then
+        return nil
+    end
+    local raw = vehicles[active.vid]
+    if raw == nil then
+        return nil
+    end
+    local info = vehicleInfo(raw)
+    local ownerName = sessions[active.owner] and sessions[active.owner].name
+        or tostring(MP.GetPlayerName(active.owner) or "")
+    return {
+        owner_pid = active.owner,
+        owner_name = ownerName,
+        vid = active.vid,
+        model = info.model,
+        config = info.config,
+        own = active.owner == pid
+    }
 end
 
 -- Keeps sessions in line with who is actually connected (covers hot reloads
@@ -730,7 +1028,7 @@ end
 -- Live snapshot (data/live.json)
 --------------------------------------------------
 
-local function vehicleInfo(raw)
+function vehicleInfo(raw)
     if type(raw) ~= "string" then
         return { model = "unknown" }
     end
@@ -793,11 +1091,23 @@ local function writeLive(serverState)
     for pid, session in pairs(sessions) do
         local record = session.uid and state.players[session.uid] or nil
         local sessionSeconds = t - session.joined
+        local pending = session.afk and 0 or (t - session.credited)
         local total = nil
         if record then
             -- Stored playtime plus the part of this session not yet credited.
-            total = int(record.playtime_seconds) + (t - session.credited)
+            total = int(record.playtime_seconds) + pending
         end
+        local vehicles, active = {}, nil
+        if serverState == "running" then
+            vehicles = playerVehicles(pid)
+            active = activeVehicleFor(pid, session)
+            if active and active.own then
+                for _, v in ipairs(vehicles) do
+                    v.active = v.vid == active.vid or nil
+                end
+            end
+        end
+        local afkSeconds = session.afk_seconds + (session.afk and (t - session.credited) or 0)
         players[#players + 1] = {
             pid = pid,
             name = session.name,
@@ -807,7 +1117,11 @@ local function writeLive(serverState)
             session_seconds = sessionSeconds,
             session_resumed = session.resumed,
             total_playtime_seconds = total,
-            vehicles = serverState == "running" and playerVehicles(pid) or {}
+            afk = session.afk,
+            idle_seconds = session.idle,
+            session_afk_seconds = afkSeconds,
+            active_vehicle = active,
+            vehicles = vehicles
         }
     end
     table.sort(players, function(a, b) return a.session_seconds > b.session_seconds end)
@@ -815,7 +1129,7 @@ local function writeLive(serverState)
     local map = tostring(setting(MP.Settings.Map) or "")
     local retained, previousUsers, rate = monthlyRetentionFor(state.monthly)
     local snapshot = {
-        schema = 1,
+        schema = 2,
         plugin_version = PLUGIN_VERSION,
         state = serverState,
         updated_at = utcTimestamp(t),
@@ -841,8 +1155,26 @@ local function writeLive(serverState)
             all_time = {
                 unique_users = countKeys(state.players),
                 joins = state.total_joins
-            }
-        }
+            },
+            joins_24h = #state.recent_joins
+        },
+        -- Max players online per 5-minute bucket, oldest first; -1 = no data.
+        online_24h = {
+            bucket_seconds = ONLINE_BUCKET,
+            start_unix = (state.online_24h.last_bucket - ONLINE_BUCKETS + 1) * ONLINE_BUCKET,
+            values = state.online_24h.values
+        },
+        -- Average players online per weekday-hour this month (configured
+        -- calendar), index 1 = Sunday 00:00 ... 168 = Saturday 23:00; -1 = no data.
+        heatmap = (function()
+            local out = {}
+            for i = 1, HEAT_SLOTS do
+                local sampled = state.monthly.heat_sampled and state.monthly.heat_sampled[i] or 0
+                out[i] = sampled > 0
+                    and math.floor(state.monthly.heat_online[i] / sampled * 100 + 0.5) / 100 or -1
+            end
+            return out
+        end)()
     }
     local ok, encoded = pcall(Util.JsonEncode, snapshot)
     if ok and encoded then
@@ -873,12 +1205,79 @@ end
 
 local function statsLines()
     return {
+        string.format("Online now: %d | Peak today: %d | Peak this month: %d | Joins last 24h: %d",
+            countKeys(sessions), state.daily.peak_online, state.monthly.peak_online, #state.recent_joins),
         periodLine("Today", state.daily),
         periodLine("Month", state.monthly),
         retentionText(),
         periodLine("Year", state.yearly),
         string.format("All-time: %d unique, %d joins", countKeys(state.players), state.total_joins)
     }
+end
+
+local WEEKDAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+
+local function slotName(slot)
+    local day = (slot - 1) // 24 + 1
+    local hour = (slot - 1) % 24
+    return string.format("%s %02d:00", WEEKDAYS[day], hour)
+end
+
+local function calendarLabel()
+    local offset = config.utc_offset_hours
+    return "UTC" .. (offset >= 0 and "+" or "") .. tostring(offset)
+end
+
+-- Peak and average players online for today, this month, this year.
+local function peakReport()
+    local lines = { "Players online (" .. calendarLabel() .. " calendar):" }
+    for _, item in ipairs({ { "Today", state.daily }, { "Month", state.monthly }, { "Year", state.yearly } }) do
+        local s = periodSummary(item[2])
+        lines[#lines + 1] = string.format("  %-6s peak %d%s | average %.2f",
+            item[1], s.peak_online, s.peak_at ~= "" and (" at " .. s.peak_at) or "", s.avg_online)
+    end
+    lines[#lines + 1] = string.format("  Now %d | joins in the last 24 h: %d", countKeys(sessions), #state.recent_joins)
+    return table.concat(lines, "\n")
+end
+
+-- Busiest and quietest hours of the week this month, plus a compact 7 x 24 grid.
+local function heatmapReport()
+    local heat, sampled = state.monthly.heat_online, state.monthly.heat_sampled
+    local averages = {}
+    for i = 1, HEAT_SLOTS do
+        if sampled[i] > 0 then
+            averages[#averages + 1] = { slot = i, avg = heat[i] / sampled[i] }
+        end
+    end
+    if #averages == 0 then
+        return "No heatmap data yet for " .. state.monthly.key .. "."
+    end
+    table.sort(averages, function(a, b) return a.avg > b.avg end)
+    local lines = { string.format("Average players online by hour, %s (%s calendar)", state.monthly.key, calendarLabel()) }
+    local busiest = {}
+    for i = 1, math.min(5, #averages) do
+        busiest[#busiest + 1] = string.format("%s (%.1f)", slotName(averages[i].slot), averages[i].avg)
+    end
+    lines[#lines + 1] = "  Busiest: " .. table.concat(busiest, ", ")
+    local max = averages[1].avg
+    local shades = { " ", ".", ":", "-", "=", "+", "*", "#", "%", "@" }
+    lines[#lines + 1] = "       " .. "0         1         2   "
+    lines[#lines + 1] = "       " .. "012345678901234567890123"
+    for day = 1, 7 do
+        local row = {}
+        for hour = 0, 23 do
+            local slot = (day - 1) * 24 + hour + 1
+            if sampled[slot] <= 0 then
+                row[#row + 1] = "?"
+            else
+                local level = max > 0 and math.floor(heat[slot] / sampled[slot] / max * 9 + 0.5) or 0
+                row[#row + 1] = shades[level + 1]
+            end
+        end
+        lines[#lines + 1] = string.format("  %s  %s", WEEKDAYS[day], table.concat(row))
+    end
+    lines[#lines + 1] = "  (blank = empty, @ = busiest, ? = server not running)"
+    return table.concat(lines, "\n")
 end
 
 local function statsMessage()
@@ -930,7 +1329,9 @@ local function monthReport(monthKey)
         string.format("  Guest joins:          %d", int(record.guest_joins)),
         string.format("  Previous month users: %d", int(record.previous_month_users)),
         string.format("  Players retained:     %d", int(record.retained_users)),
-        string.format("  Monthly retention:    %s", formatPercent(tonumber(record.retention_rate)))
+        string.format("  Monthly retention:    %s", formatPercent(tonumber(record.retention_rate))),
+        string.format("  Peak players online:  %d", int(record.peak_online)),
+        string.format("  Average online:       %.2f", tonumber(record.avg_online) or 0)
     }
     return table.concat(lines, "\n")
 end
@@ -943,9 +1344,15 @@ local function onlineReport()
         for _, v in ipairs(playerVehicles(pid)) do
             vehicles[#vehicles + 1] = v.config and (v.model .. " (" .. v.config .. ")") or v.model
         end
-        lines[#lines + 1] = string.format("  [%d] %s | session %s | vehicles: %s",
-            pid, session.name, formatDuration(t - session.joined),
-            #vehicles > 0 and table.concat(vehicles, ", ") or "none")
+        local active = activeVehicleFor(pid, session)
+        local driving = ""
+        if active then
+            driving = active.own and (" | driving " .. active.model)
+                or (" | watching " .. active.owner_name .. " (" .. active.model .. ")")
+        end
+        lines[#lines + 1] = string.format("  [%d] %s%s | session %s%s | vehicles: %s",
+            pid, session.name, session.afk and " [AFK]" or "", formatDuration(t - session.joined),
+            driving, #vehicles > 0 and table.concat(vehicles, ", ") or "none")
     end
     table.sort(lines)
     table.insert(lines, 1, string.format("Online: %d player(s)", #lines))
@@ -981,8 +1388,9 @@ local function playtimeLine(pid)
     local text = "Session: " .. formatDuration(t - session.joined)
     if session.uid and state.players[session.uid] then
         local record = state.players[session.uid]
+        local pending = session.afk and 0 or (t - session.credited)
         text = text .. " | Total playtime: " ..
-            formatDuration(int(record.playtime_seconds) + (t - session.credited)) ..
+            formatDuration(int(record.playtime_seconds) + pending) ..
             " | Joins: " .. int(record.joins)
     end
     return text
@@ -1058,6 +1466,10 @@ function PlayerCounter_OnPlayerJoining(playerID)
         endSession(playerID)
     end
     startSession(playerID, playerName, beammpID, isGuest, false)
+    state.recent_joins[#state.recent_joins + 1] = now()
+    pruneRecentJoins()
+    notePeaks(onlineCount())  -- catch peaks shorter than one tick
+    noteGraph(onlineCount())
 
     appendJoinLog(timestamp, periodKeys(), beammpID or "", playerName, isGuest)
     dirty = true
@@ -1076,6 +1488,34 @@ function PlayerCounter_OnPlayerDisconnect(playerID)
     log(session.name .. " left after " .. formatDuration(now() - session.joined))
     saveState()
     writeLive("running")
+end
+
+-- The optional client mod reports which vehicle the player is in, as JSON
+-- {"v":1,"sid":"<owner pid>-<vid>"} ("sid":"" = none). Client data is
+-- untrusted: only a vehicle that currently exists on the server is accepted.
+function PlayerCounter_OnActiveVehicle(playerID, data)
+    local session = ready and sessions[playerID]
+    if not session or type(data) ~= "string" or #data > 200 then
+        return
+    end
+    local ok, payload = pcall(Util.JsonDecode, data)
+    if not ok or type(payload) ~= "table" or type(payload.sid) ~= "string" then
+        return
+    end
+    if payload.sid == "" then
+        session.active = nil
+        return
+    end
+    local owner, vid = payload.sid:match("^(%d+)%-(%d+)$")
+    owner, vid = tonumber(owner), tonumber(vid)
+    if not owner or not vid then
+        return
+    end
+    local okVehicles, vehicles = pcall(MP.GetPlayerVehicles, owner)
+    if not okVehicles or type(vehicles) ~= "table" or vehicles[vid] == nil then
+        return
+    end
+    session.active = { owner = owner, vid = vid }
 end
 
 --------------------------------------------------
@@ -1131,7 +1571,9 @@ local CONSOLE_HELP = table.concat({
     "  playerstats / pc.stats        overall analytics",
     "  retention   / pc.retention    month-over-month retention",
     "  pc.month [YYYY-MM]            monthly report (current month if omitted)",
-    "  pc.online                     who is online, session time, vehicles",
+    "  pc.online                     who is online, session time, AFK, vehicles",
+    "  pc.peak                       peak and average players online",
+    "  pc.heatmap                    busiest hours of the week this month",
     "  pc.top [N]                    top N players by playtime (default 10)",
     "  pc.save                       save statistics and live.json now"
 }, "\n")
@@ -1154,6 +1596,12 @@ function PlayerCounter_OnConsoleInput(input)
         return monthReport(words[2])
     elseif command == "pc.online" then
         return onlineReport()
+    elseif command == "pc.peak" then
+        refreshPeriods()
+        return peakReport()
+    elseif command == "pc.heatmap" then
+        refreshPeriods()
+        return heatmapReport()
     elseif command == "pc.top" then
         return topPlaytimeReport(math.max(1, math.min(50, int(words[2] or 10))))
     elseif command == "pc.save" then
@@ -1175,9 +1623,16 @@ function PlayerCounter_OnTick()
     if not ready then
         return
     end
+    local t = now()
+    local dt = lastTick and (t - lastTick) or 0
+    lastTick = t
     updatePeriods()       -- day/month/year rollover even when nobody joins
     reconcileSessions()
+    if dt > 0 and dt <= config.live_interval_seconds * 3 then
+        updateAfk(dt)
+    end
     creditPlaytime()
+    sampleOnline()
     if dirty and now() - lastSaveTime >= PLAYTIME_SAVE_INTERVAL then
         saveState()
     end
@@ -1217,6 +1672,8 @@ function PlayerCounter_OnInit()
         log("Calendar period rollover processed on startup.")
     end
     reconcileSessions() -- players already online after a hot reload
+    sampleOnline()      -- starts the averages clock and the 24 h graph
+    lastTick = now()
     saveState()
 
     MP.RegisterEvent("PlayerCounter_Tick", "PlayerCounter_OnTick")
@@ -1237,6 +1694,7 @@ function PlayerCounter_OnShutdown()
     end
     updatePeriods()
     creditPlaytime()
+    sampleOnline()
     saveState()
     sessions = {}
     writeLive("stopped")
@@ -1253,3 +1711,4 @@ MP.RegisterEvent("onPlayerDisconnect", "PlayerCounter_OnPlayerDisconnect")
 MP.RegisterEvent("onChatMessage", "PlayerCounter_OnChatMessage")
 MP.RegisterEvent("onConsoleInput", "PlayerCounter_OnConsoleInput")
 MP.RegisterEvent("onShutdown", "PlayerCounter_OnShutdown")
+MP.RegisterEvent(ACTIVE_VEHICLE_EVENT, "PlayerCounter_OnActiveVehicle")

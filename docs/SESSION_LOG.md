@@ -62,3 +62,46 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 **Done**
 - Added `HANDOFF.md`, `docs/SESSION_LOG.md`, `CLAUDE.md`, `tests/` (plugin test, runners, fake panel/Discord, sample live.json, test config). Both test suites re-run from the repo: 45/45 and OK.
 - Pushed to `playercounter-2.0.1` (updates PR #2) and wrote the Project docs.
+
+---
+
+## Session 1, part 2: 2026-10-27
+
+- Same Claude Code cloud session (`session_01YMAAefrrzE187RmbqyseJo`), resumed after nine days; attached to the claude.ai Project "Player Counter v2.0.1".
+
+### Prompt 5 (2026-10-27 11:17)
+
+> research for similiar projects for this game, fr multiplayer, list features to be added and what we cna improve on
+
+**Done**
+- Web research on BeamMP plugins, bots and panels, plus analytics tools in other games (Plan for Minecraft, txAdmin for FiveM, sTracker for Assetto Corsa, BattleMetrics/GameTracker, DiscordGSM).
+- Answered in chat with a prioritised feature list (15 items) and improvements to 2.0.1. Recommended items 1, 2, 3 and 6 as 2.1.
+
+### Prompt 6 (2026-10-27 11:27)
+
+> reattempt all failed
+
+**Done**
+- Retried the six sources that failed. Blocked GitHub pages were read by cloning the public repos (DiscordGSM/GameServerMonitor, levg34/beammp-admin, ayozetr/beamng-server-panel, A-Morgoth/AdminMP). The BeamMP public server list URL stayed blocked; its fields were taken from GameServerMonitor's `beammp.py` (ip, port, sname, map, players, maxplayers, playerslist `;`-separated, password). tracker.gg still failed (irrelevant: Steam population only).
+- Correction to prompt 5's answer: there **are** BeamMP Discord bots (GameServerMonitor, BeamMP Stats, BEAMER, BeamMP Status), all limited to the public list. beamng-server-panel is the closest project (same Lua file-bridge design, connection history, moderation; dropped leaderboards; restrictive license, ideas only). Added roadmap ideas: friend alerts, down alerts with role ping, joins-in-24h, staff notes, scheduled messages.
+
+### Prompt 7 (2026-10-27 11:29)
+
+> Create a Claude Doc from your last answer.
+
+**Done**
+- Created the claude.ai doc "BeamMP Tools Landscape & PlayerCounter Roadmap" (https://claude.ai/artifact/PiRfqZkrXfvJpy3EbxK8Js): summary, bots table, panels, public list fields, positioning (D14), 15-item roadmap, improvements, sources.
+
+### Prompt 8 (2026-10-27 11:30, sent while prompt 7 was running)
+
+> continue work
+
+**Decided**: D15–D20 in HANDOFF.md (build 2.1.0 = roadmap items 1, 2, 3, 6; server-side AFK; optional untrusted client mod for the current vehicle; plugin keeps the 24 h graph data, script draws the PNG with stdlib; additive live.json schema 2; stacked branch/PR).
+
+**Done**
+- `main.lua` 2.1.0: peak/average players online per day/month/year (short peaks caught at join), 168-slot weekday-hour heatmap per month, 24 h graph buckets (`online_24h`), joins in last 24 h, AFK detection (positions via `MP.GetPositionRaw`, `afk_*` settings, `afk_seconds`), `PlayerCounter_activeVehicle` handler with validation, `pc.peak`, `pc.heatmap`, richer `pc.online`, `pc.month` peak/average, `/playerstats` headline line, live.json schema 2.
+- Client mod `client/` (`playerCounter_client`): checks every 2 s, sends the camera vehicle's server id on change and once a minute; `client/build_zip.sh`.
+- `discord/discord_status.py` 2.1.0: stdlib PNG step chart of the last 24 h attached via multipart, caption with `<t:unix:t>` peak time, driving/watching/AFK in player lines, Today peak, `show_graph`, `--dry-run` writes a preview PNG. Viewed the rendered graph on a Discord-dark background: correct.
+- Tests: new `tests/plugin_test_21.lua` (40 checks), `tests/client_test.lua` (7, LuaJIT), runner now runs every `plugin_test*.lua`, fake Discord parses multipart and the e2e test asserts graphs. Results: 45/45, 40/40, 7/7, Discord e2e OK. Three test-side mistakes fixed on the way (old 5-line expectation, AFK switching-tick arithmetic, Lua pattern `-` in `find`); no plugin bugs found.
+- README, CHANGELOG (2.1.0), Full Installation Guide (client mod, AFK settings, new commands), HANDOFF updated.
+- Pushed branch `playercounter-2.1` and opened PR #3 (base `playercounter-2.0.1`); mirrored HANDOFF and this log to the Project.

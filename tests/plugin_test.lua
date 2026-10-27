@@ -78,7 +78,7 @@ expect(top:find("Alice - 1h 30m", 1, true), "pc.top: " .. top)
 print("== chat commands")
 local n0 = #S.chatLog
 expect(S:chat(b, "/playerstats") == false, "/playerstats is not broadcast")
-expect(#S.chatLog - n0 == 5, "/playerstats sends 5 short lines")
+expect(#S.chatLog - n0 == 6, "/playerstats sends 6 short lines")
 expect(S:chat(b, "  /Retention ") == false, "/Retention handled case/space-insensitively")
 expect(S:chat(b, "hello") == true, "normal chat untouched")
 
