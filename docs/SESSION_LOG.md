@@ -197,3 +197,12 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 
 **Done**
 - Owner's site `config.php`: `display_time_zone` empty. `app.js`: with no display zone, the header shows just the time and the footer says times are in the visitor's own zone while the activity grid uses each server's calendar (named under the grid). Verified in Chromium from Singapore (1:58 PM) and New York (1:58 AM). Rebuilt and re-sent `stats.baja75series.org-site.zip`; server zip unchanged.
+
+### Prompt 19 (2026-10-27 14:10)
+
+(a screenshot of the live site's "When people play" heatmap: all hours striped except one dark square on Tuesday 00:00, legend "The busiest hour averages 1.0 players; times in St George, Utah time, UTC-6")
+
+**Found**: a BeamMP server is uploading with the St George calendar. Bug: when every recorded hour averages 0 players, the page used 1 as the colour scale and printed that 1 as the busiest-hour average.
+
+**Done**
+- `app.js`: the scale fallback is never shown; the legend says "No players online in the hours recorded so far" when all recorded hours are 0, otherwise "The busiest hour so far averages N players", and explains that striped hours aren't recorded yet. Checked in Chromium with an all-zero server and a busy one. Rebuilt and re-sent the site zip.

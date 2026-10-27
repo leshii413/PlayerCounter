@@ -257,7 +257,8 @@
       wrap.appendChild(h("p.empty-note", { text: "Builds up over the month as the server runs." }));
       return wrap;
     }
-    var max = Math.max.apply(null, real) || 1;
+    var busiest = Math.max.apply(null, real);   // real value, may be 0
+    var max = busiest || 1;                      // scale only; never shown
     var grid = h("div.heat", { role: "img", "aria-label": "Average players online by weekday and hour this month" });
     grid.appendChild(h("span"));
     for (var hr = 0; hr < 24; hr++) grid.appendChild(h("span.hr", { text: hr % 6 === 0 ? String(hr) : "" }));
@@ -275,7 +276,9 @@
     var tz = (calendarName ? calendarName + ", " : "") + "UTC" + (offset >= 0 ? "+" : "") + offset;
     wrap.appendChild(h("div.heat-legend", null, "Quiet",
       [0, 1, 2, 3, 4].map(function (l) { return h("span.sw", { "data-l": String(l) }); }),
-      "Busy. The busiest hour averages " + max.toFixed(1) + " players; times in " + tz + "."));
+      busiest > 0
+        ? "Busy. The busiest hour so far averages " + busiest.toFixed(1) + " players. Striped hours aren't recorded yet. Times in " + tz + "."
+        : "Busy. No players online in the hours recorded so far. Striped hours aren't recorded yet. Times in " + tz + "."));
     return wrap;
   }
 

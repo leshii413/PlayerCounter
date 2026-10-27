@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 14:05 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 14:15 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
@@ -27,7 +27,7 @@ Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools L
 | Plugin version | 2.1.0 on `playercounter-2.1` (`PLUGIN_VERSION` in `main.lua`); Discord script 2.1.0; `live.json` schema 2. |
 | Tested offline | Yes: 45/45 + 49/49 plugin checks (BeamMP mock, Lua 5.3), 7/7 client-mod checks (LuaJIT, stubbed game API), Discord script end to end vs fake panel + fake Discord incl. multipart graph upload, website end to end 20/20 (PHP 8.3 built-in server; content, privacy, merging, forged/old/replayed uploads), page screenshots desktop/mobile/dark with no console errors or horizontal scroll. |
 | Tested live | **No.** Never run on a real BeamMP server, Pterodactyl panel, BeamNG client, Discord or Namecheap hosting. First live test is the top open item. |
-| Website hosting | Owner said baja75series.org is on **Namecheap shared hosting** (cPanel); stats.baja75series.org not created yet. Owner received ready-to-extract zips (2026-10-27): `stats.baja75series.org-site.zip` (site + filled `config.php`) and `BeamMP-server-files.zip` (main.lua, `data/website.json`, client mod) plus `SETUP-INSTRUCTIONS.md`. The shared secret exists **only in those zips** (generated in-session, never committed, not in the Project or memory); a new session cannot recover it and should generate a new one for both sides if needed. |
+| Website hosting | stats.baja75series.org is **live** on the owner's Namecheap shared hosting, and at least one BeamMP server is uploading with the St George calendar (owner screenshots, 2026-10-27 14:10). Owner received ready-to-extract zips (2026-10-27): `stats.baja75series.org-site.zip` (site + filled `config.php`) and `BeamMP-server-files.zip` (main.lua, `data/website.json`, client mod) plus `SETUP-INSTRUCTIONS.md`. The shared secret exists **only in those zips** (generated in-session, never committed, not in the Project or memory); a new session cannot recover it and should generate a new one for both sides if needed. |
 
 ## 3. File map
 
