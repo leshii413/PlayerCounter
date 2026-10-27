@@ -5,13 +5,15 @@ A small PHP site that shows every server's live players, 24-hour graph, activity
 ## How it fits together
 
 ```text
-BeamMP servers (Pterodactyl)          the machine running discord_status.py         Namecheap hosting
-PlayerCounter writes live.json  --->  reads each live.json every 5 min       --->  stats.baja75series.org
-                                      posts to Discord (optional)                   ingest.php saves it
-                                      posts to the website, signed with a secret    api.php + the page show it
+BeamMP server (Pterodactyl)                          Namecheap hosting
+PlayerCounter, with data/website.json   --- HTTPS -->  stats.baja75series.org
+uploads every minute and on joins/leaves,             ingest.php checks the signature and saves it
+signed with the shared secret (curl, background)      api.php + the page show it
 ```
 
-The status script already reads every server, so it also sends each server's stats to the website. Every upload is signed with a secret that only the script and the site know, so nobody else can post fake stats. BeamMP account IDs travel to the site (to merge the same player across servers) but are never shown on the page or in `api.php`.
+Each BeamMP server uploads its own stats: no extra program to run. Every upload is signed with a secret that only the servers and the site know, so nobody else can post fake stats. The server's name on the site comes from its BeamMP server name. BeamMP account IDs travel to the site (to merge the same player across servers) but are never shown on the page or in `api.php`.
+
+Uploads use `curl`, which the Pterodactyl BeamMP images include. If a server has no curl, the console says so; the Discord status script can upload for it instead (`website_url` / `website_secret` in `discord_status.json`). Use one or the other for a server, not both.
 
 ## Files
 
@@ -70,9 +72,22 @@ In cPanel, open **Select PHP Version** (or **MultiPHP Manager**) and pick PHP 8.
    This puts it in `/home/<cpanel user>/playercounter-data`, which the web server never serves.
 4. Optional: `site_title`, `show_player_names` (`false` = totals and graphs only), `leaderboard_size`.
 
-### 6. Point the status script at the site
+### 6. Point the BeamMP servers at the site
 
-In `discord/discord_status.json` on the machine that runs the script:
+On each BeamMP server, create `Resources/Server/PlayerCounter/data/website.json`:
+
+```json
+{
+    "url": "https://stats.baja75series.org/ingest.php",
+    "secret": "the same secret as in config.php"
+}
+```
+
+Optional keys: `server_name` (name on the site, default = the BeamMP server name), `server_key` (short id for the data file, default = made from the name; keep names unique across servers), `connect` (address shown with a Copy button, e.g. `"203.0.113.10:30814"`), `order` (position on the page), `interval_seconds` (default 60).
+
+Restart the server. The console prints `Website uploads on: ...` and, within a minute, `Website upload OK.`
+
+**Alternative: the status script uploads.** In `discord/discord_status.json` on the machine that runs the script:
 
 ```json
 "website_url": "https://stats.baja75series.org/ingest.php",
@@ -81,15 +96,7 @@ In `discord/discord_status.json` on the machine that runs the script:
 
 or set the secret as the environment variable `PLAYERCOUNTER_WEBSITE_SECRET`. Give each server a short `site_key` (`"na1"`, `"eu2"`): it names the server's data file, and changing it later starts that server fresh on the site. Servers appear on the page in the order they're listed.
 
-The website works without Discord too: leave `webhook_url` empty and the script only updates the site.
-
-Run it once to check:
-
-```bash
-python3 discord_status.py --once
-```
-
-Each server should log without a `website update failed` line. Then open https://stats.baja75series.org.
+The script then uploads every 5 minutes; set `stale_after_seconds` to 900 in `config.php`. Run `python3 discord_status.py --once`; each server should log without a `website update failed` line.
 
 ### 7. Check the protection
 
@@ -103,8 +110,11 @@ If `data/` is visible, your hosting ignores `.htaccess`: move `data_dir` outside
 
 ## Troubleshooting
 
-| Script log or page says | Fix |
+| BeamMP console, script log or page says | Fix |
 |---|---|
+| `WARNING: website upload failed (HTTP 401): Bad signature` | `secret` in `website.json` differs from `config.php`. |
+| `WARNING: curl is not installed on this server` | Use the status script for that server (see the alternative in step 6). |
+| `data/website.json url must look like https://...` | Use the full address ending in `/ingest.php`. |
 | `website rejected the upload (401): Bad signature` | `website_secret` and `config.php`'s `secret` differ (watch for spaces or quotes). |
 | `(401): Timestamp too far from server time` | The clock on the machine running the script is off by more than 5 minutes; turn on automatic time sync. |
 | `(409): Not newer than the last upload` | Two copies of the script are running, or the clock went backwards. Run one copy. |

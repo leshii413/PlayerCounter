@@ -125,3 +125,27 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 - `discord_status.py`: `website_url`, `website_secret`/`PLAYERCOUNTER_WEBSITE_SECRET`, `site_key`; website-only mode without a webhook.
 - Tests: plugin 45/45 + 49/49, client 7/7, Discord e2e OK, new `tests/run_web_test.sh` 20/20 OK. Screenshots (desktop, mobile, dark): fixed an empty numbers table on offline servers, a repeated error message, small chart labels, the footer rule, inline styles blocked by the CSP, and mid-word name breaks on mobile (rows now stack).
 - Pushed to `playercounter-2.1` (PR #3 updated) and mirrored HANDOFF and this log to the Project.
+
+### Prompt 10 (2026-10-27 12:37)
+
+> set up the config.php ready to go for me to add
+
+**Done**
+- Generated a 48-character secret and a filled `config.php` (`data_dir` one level above the site folder, title "BAJA75SERIES server stats") plus the matching `discord_status.json` lines; tested a signed upload against it locally. Delivered as files only (D27).
+
+### Prompt 11 (2026-10-27 12:52)
+
+> set up the full zip for ready to just extract in the file manager for the site. add instructions for what is needed to be added to the beammp server
+
+### Prompt 12 (2026-10-27 12:53, sent while prompt 11 was running)
+
+> no editing, ready to upload
+
+**Decided**: D28 (plugin uploads to the site itself so the server zip needs no edits), D29 (stale after 300 s).
+
+**Done**
+- `main.lua`: pure-Lua SHA-256/HMAC (46/46 vectors match Python), `data/website.json` settings, background curl upload every 60 s, on joins/leaves (≥ 5 s apart), at init and on shutdown (marks offline), result logging, URL validation against shell injection; `buildSnapshot()` split from `writeLive()`.
+- `discord_status.py`: placeholder values (`PASTE...`, `YOUR-PANEL`) reported as missing settings.
+- Tests: new `tests/web_push_test.lua` (9/9) inside `tests/run_web_test.sh` (20/20 + OK); plugin 45/45 and 49/49; Discord e2e OK. Confirmed the Pterodactyl debian yolks ship curl.
+- Built and acceptance-tested the owner's zips together (extracted as uploaded; only the URL pointed at a local copy): `stats.baja75series.org-site.zip`, `BeamMP-server-files.zip`, plus `SETUP-INSTRUCTIONS.md` (Namecheap + Pterodactyl steps, console lines to expect, troubleshooting). The secret is only in those zips.
+- Docs: README, web/README (plugin upload is the default; script upload as alternative), CHANGELOG, config.sample.php. Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log.

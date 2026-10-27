@@ -5,8 +5,9 @@
 // blocks it as well.
 
 return [
-    // Shared secret. The Discord status script signs every upload with it;
-    // use the same value for "website_secret" in discord_status.json.
+    // Shared secret. Every upload is signed with it. Use the same value as
+    // "secret" in the BeamMP servers' data/website.json (or "website_secret"
+    // in discord_status.json if the status script uploads instead).
     // Make it long and random, e.g. 48+ characters from a password manager.
     'secret' => 'CHANGE_ME_TO_A_LONG_RANDOM_SECRET',
 
@@ -20,8 +21,9 @@ return [
     'site_title' => 'BAJA75SERIES server stats',
 
     // A server that has not sent data for this long is shown as "no data".
-    // The Discord script sends every 5 minutes by default.
-    'stale_after_seconds' => 900,
+    // The plugin uploads every minute (and on joins/leaves); if the Discord
+    // status script uploads instead (every 5 minutes), use 900.
+    'stale_after_seconds' => 300,
 
     // Show player names (live list and leaderboards). false = totals only.
     'show_player_names' => true,

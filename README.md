@@ -51,6 +51,7 @@ Resources/Server/PlayerCounter/
     ├── config.json     settings (edit this, then restart)
     ├── stats.json      analytics database
     ├── stats.json.bak  previous save, used for automatic recovery
+    ├── website.json    optional: stats website address + secret (you create it)
     ├── joins.csv       raw connection log
     └── live.json       who is online right now (rewritten every 30 s)
 ```
@@ -236,7 +237,7 @@ Useful if you want your own website or bot to read it:
 
 ## Stats website
 
-`web/` is a small PHP site for ordinary shared hosting, set up for `stats.baja75series.org`. The Discord status script sends each server's stats to it every 5 minutes, signed with a shared secret. The page shows each server as a race plate with its player count, then for every server: who's on (vehicle, session, playtime, AFK), the 24-hour graph, the weekday-hour heatmap, today / month / year / all-time numbers, and seat-time leaderboards. A series leaderboard adds up the same BeamMP account across all servers. BeamMP IDs are never published.
+`web/` is a small PHP site for ordinary shared hosting, set up for `stats.baja75series.org`. Each BeamMP server uploads its own stats every minute and on joins/leaves when `data/website.json` holds the site address and shared secret (uploads use `curl` in the background and are signed with HMAC-SHA256); the Discord status script can upload instead. The page shows each server as a race plate with its player count, then for every server: who's on (vehicle, session, playtime, AFK), the 24-hour graph, the weekday-hour heatmap, today / month / year / all-time numbers, and seat-time leaderboards. A series leaderboard adds up the same BeamMP account across all servers. BeamMP IDs are never published.
 
 Step-by-step setup for Namecheap (subdomain, SSL, upload, secret, checks): **[web/README.md](web/README.md)**.
 

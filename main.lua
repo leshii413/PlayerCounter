@@ -27,6 +27,12 @@ local STATE_FILE = DATA_DIR .. "/stats.json"
 local JOIN_LOG = DATA_DIR .. "/joins.csv"
 local LIVE_FILE = DATA_DIR .. "/live.json"
 local CONFIG_FILE = DATA_DIR .. "/config.json"
+-- Optional: stats website upload settings (see web/README.md). The file is
+-- separate from config.json so a ready-made copy can ship with the plugin.
+local WEBSITE_FILE = DATA_DIR .. "/website.json"
+local WEBSITE_BODY = DATA_DIR .. "/website_upload.json"
+local WEBSITE_REPLY = DATA_DIR .. "/website_reply.txt"
+local WEBSITE_CODE = DATA_DIR .. "/website_status.txt"
 
 local DEFAULT_CONFIG = {
     -- Calendar used for day / month / year rollover. 0 = UTC, 8 = UTC+8 (PH/SG),
@@ -247,6 +253,71 @@ local function formatDuration(seconds)
         return string.format("%dh %02dm", hours, minutes)
     end
     return string.format("%dm", minutes)
+end
+
+--------------------------------------------------
+-- SHA-256 / HMAC-SHA256 (pure Lua 5.3) for signing website uploads
+--------------------------------------------------
+
+local SHA_K = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+}
+
+local function sha256(message)
+    local M = 0xffffffff
+    local function rotr(x, n)
+        return ((x >> n) | (x << (32 - n))) & M
+    end
+    local bitLength = #message * 8
+    message = message .. "\128" .. string.rep("\0", (55 - #message) % 64) .. string.pack(">I8", bitLength)
+    local h0, h1, h2, h3 = 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a
+    local h4, h5, h6, h7 = 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    local w = {}
+    for chunk = 1, #message, 64 do
+        for i = 1, 16 do
+            w[i] = string.unpack(">I4", message, chunk + (i - 1) * 4)
+        end
+        for i = 17, 64 do
+            local a, b = w[i - 15], w[i - 2]
+            local s0 = rotr(a, 7) ~ rotr(a, 18) ~ (a >> 3)
+            local s1 = rotr(b, 17) ~ rotr(b, 19) ~ (b >> 10)
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & M
+        end
+        local a, b, c, d, e, f, g, h = h0, h1, h2, h3, h4, h5, h6, h7
+        for i = 1, 64 do
+            local S1 = rotr(e, 6) ~ rotr(e, 11) ~ rotr(e, 25)
+            local ch = (e & f) ~ ((~e) & g)
+            local t1 = (h + S1 + ch + SHA_K[i] + w[i]) & M
+            local S0 = rotr(a, 2) ~ rotr(a, 13) ~ rotr(a, 22)
+            local maj = (a & b) ~ (a & c) ~ (b & c)
+            local t2 = (S0 + maj) & M
+            h, g, f, e, d, c, b, a = g, f, e, (d + t1) & M, c, b, a, (t1 + t2) & M
+        end
+        h0, h1, h2, h3 = (h0 + a) & M, (h1 + b) & M, (h2 + c) & M, (h3 + d) & M
+        h4, h5, h6, h7 = (h4 + e) & M, (h5 + f) & M, (h6 + g) & M, (h7 + h) & M
+    end
+    return string.pack(">I4I4I4I4I4I4I4I4", h0, h1, h2, h3, h4, h5, h6, h7)
+end
+
+local function toHex(bytes)
+    return (bytes:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+
+local function hmacSha256Hex(key, message)
+    if #key > 64 then
+        key = sha256(key)
+    end
+    key = key .. string.rep("\0", 64 - #key)
+    local inner = key:gsub(".", function(c) return string.char(c:byte() ~ 0x36) end)
+    local outer = key:gsub(".", function(c) return string.char(c:byte() ~ 0x5c) end)
+    return toHex(sha256(outer .. sha256(inner .. message)))
 end
 
 --------------------------------------------------
@@ -1132,10 +1203,7 @@ local function leaderboard(scope, limit)
     return rows
 end
 
-local function writeLive(serverState)
-    if not config.live_snapshot or not ready then
-        return
-    end
+local function buildSnapshot(serverState)
     local t = now()
     local players = {}
     for pid, session in pairs(sessions) do
@@ -1232,12 +1300,164 @@ local function writeLive(serverState)
             return out
         end)()
     }
-    local ok, encoded = pcall(Util.JsonEncode, snapshot)
-    if ok and encoded then
-        local wrote, err = writeFileAtomic(LIVE_FILE, encoded, false)
-        if not wrote then
-            log("ERROR: Could not write live.json: " .. tostring(err))
+    return snapshot
+end
+
+--------------------------------------------------
+-- Stats website upload (optional, data/website.json)
+--------------------------------------------------
+-- Each upload is the live snapshot plus server info, signed with
+-- HMAC-SHA256 over "<unix time>.<body>" using the shared secret, and sent by
+-- curl in the background so the game server never waits for the website.
+
+local website = nil          -- loaded settings, or nil when not configured
+local websiteLastPush = 0
+local websiteLastStatus = nil
+local websiteLastPlayers = nil  -- player count at the last upload
+local WEBSITE_MIN_GAP = 5       -- seconds between uploads caused by joins/leaves
+local startedAt = now()
+
+local function cleanServerName(text)
+    return (tostring(text or ""):gsub("%^[%da-fA-FlmnoprLMNOPR]", ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function shellQuote(text)
+    return "'" .. tostring(text):gsub("'", "'\\''") .. "'"
+end
+
+local function loadWebsite()
+    website = nil
+    local loaded, err = decodeJsonFile(WEBSITE_FILE)
+    if not loaded then
+        if err ~= "missing" then
+            log("WARNING: data/website.json is " .. err .. "; website uploads are off.")
         end
+        return
+    end
+    local url = tostring(loaded.url or "")
+    local secret = tostring(loaded.secret or "")
+    if url == "" then
+        return
+    end
+    if not url:match("^https://[%w%.%-]+[%w%-%./_]*$") and not url:match("^http://127%.0%.0%.1[:%d]*/[%w%-%./_]*$") then
+        log("WARNING: data/website.json url must look like https://stats.example.com/ingest.php; uploads are off.")
+        return
+    end
+    if #secret < 24 then
+        log("WARNING: data/website.json secret is missing or too short; uploads are off.")
+        return
+    end
+    local ok = os.execute(MP.GetOSName() == "Windows" and "where curl >nul 2>nul" or "command -v curl >/dev/null 2>&1")
+    if not ok then
+        log("WARNING: curl is not installed on this server, so website uploads are off.")
+        return
+    end
+    local name = cleanServerName(loaded.server_name ~= nil and loaded.server_name or setting(MP.Settings.Name))
+    local key = tostring(loaded.server_key or ""):lower()
+    if key == "" then
+        key = name:lower():gsub("[^%w_%-]+", "-"):gsub("^[-_]+", ""):gsub("[-_]+$", ""):sub(1, 40)
+    end
+    if not key:match("^[a-z0-9][a-z0-9_%-]*$") or #key > 40 then
+        key = "server"
+    end
+    website = {
+        url = url,
+        secret = secret,
+        key = key,
+        name = name ~= "" and name or key,
+        connect = tostring(loaded.connect or ""),
+        order = int(loaded.order),
+        interval = math.max(30, int(loaded.interval_seconds ~= nil and loaded.interval_seconds or 60))
+    }
+    log("Website uploads on: " .. url .. " as \"" .. website.name .. "\" (key " .. key .. ").")
+end
+
+-- Logs the result of the previous background upload when it changes.
+local function checkWebsiteReply()
+    if not website then
+        return
+    end
+    local code = readFile(WEBSITE_CODE)
+    if not code or code == "" then
+        return
+    end
+    code = code:match("%d+") or code
+    if code ~= websiteLastStatus then
+        if code == "200" then
+            log("Website upload OK.")
+        else
+            local reply = (readFile(WEBSITE_REPLY) or ""):gsub("%s+", " "):sub(1, 200)
+            log("WARNING: website upload failed (HTTP " .. code .. "): " .. reply)
+        end
+        websiteLastStatus = code
+    end
+end
+
+local function pushWebsite(snapshot, serverState, wait)
+    if not website or not snapshot then
+        return
+    end
+    local payload = {
+        server = { key = website.key, name = website.name, connect = website.connect, order = website.order },
+        panel_state = serverState == "running" and "running" or "offline",
+        uptime_ms = (now() - startedAt) * 1000,
+        live = snapshot
+    }
+    local ok, body = pcall(Util.JsonEncode, payload)
+    if not ok or not body then
+        return
+    end
+    local file = io.open(WEBSITE_BODY, "wb")
+    if not file then
+        log("WARNING: could not write " .. WEBSITE_BODY)
+        return
+    end
+    file:write(body)
+    file:close()
+    local timestamp = tostring(now())
+    local signature = hmacSha256Hex(website.secret, timestamp .. "." .. body)
+    local parts = {
+        "curl -s -m " .. (wait and "5" or "15"),
+        "-A " .. shellQuote("PlayerCounter/" .. PLUGIN_VERSION),
+        "-H " .. shellQuote("Content-Type: application/json"),
+        "-H " .. shellQuote("X-PlayerCounter-Timestamp: " .. timestamp),
+        "-H " .. shellQuote("X-PlayerCounter-Signature: sha256=" .. signature),
+        "--data-binary @" .. shellQuote(WEBSITE_BODY),
+        "-o " .. shellQuote(WEBSITE_REPLY),
+        "-w " .. shellQuote("%{http_code}"),
+        shellQuote(website.url)
+    }
+    local command = table.concat(parts, " ")
+    if MP.GetOSName() == "Windows" then
+        command = command:gsub("'", '"'):gsub("%%{http_code}", "%%%%{http_code}")
+        command = (wait and "" or 'start "" /B ') .. 'cmd /C "' .. command .. ' > "' .. WEBSITE_CODE .. '""'
+    else
+        command = command .. " > " .. shellQuote(WEBSITE_CODE) .. " 2>/dev/null" .. (wait and "" or " &")
+    end
+    os.execute(command)
+    websiteLastPush = now()
+end
+
+local function writeLive(serverState, forcePush)
+    if not ready then
+        return
+    end
+    local snapshot = buildSnapshot(serverState)
+    if config.live_snapshot then
+        local ok, encoded = pcall(Util.JsonEncode, snapshot)
+        if ok and encoded then
+            local wrote, err = writeFileAtomic(LIVE_FILE, encoded, false)
+            if not wrote then
+                log("ERROR: Could not write live.json: " .. tostring(err))
+            end
+        end
+    end
+    local count = snapshot.player_count
+    local since = now() - websiteLastPush
+    if website and (forcePush or since >= website.interval
+        or (count ~= websiteLastPlayers and since >= WEBSITE_MIN_GAP)) then
+        websiteLastPlayers = count
+        pushWebsite(snapshot, serverState, serverState ~= "running")
     end
 end
 
@@ -1692,6 +1912,7 @@ function PlayerCounter_OnTick()
     if dirty and now() - lastSaveTime >= PLAYTIME_SAVE_INTERVAL then
         saveState()
     end
+    checkWebsiteReply()
     writeLive("running")
 end
 
@@ -1735,7 +1956,8 @@ function PlayerCounter_OnInit()
     MP.RegisterEvent("PlayerCounter_Tick", "PlayerCounter_OnTick")
     MP.CancelEventTimer("PlayerCounter_Tick")
     MP.CreateEventTimer("PlayerCounter_Tick", config.live_interval_seconds * 1000)
-    writeLive("running")
+    loadWebsite()
+    writeLive("running", true)
 
     log("PlayerCounter " .. PLUGIN_VERSION .. " loaded (calendar UTC" ..
         (config.utc_offset_hours >= 0 and "+" or "") .. tostring(config.utc_offset_hours) ..
@@ -1753,7 +1975,7 @@ function PlayerCounter_OnShutdown()
     sampleOnline()
     saveState()
     sessions = {}
-    writeLive("stopped")
+    writeLive("stopped", true)  -- tells the website the server went offline
     log("Statistics saved on shutdown.")
 end
 

@@ -163,8 +163,15 @@ def load_config(path):
     if any(s.get("id") for s in cfg["servers"]):
         if not cfg["panel_url"]:
             problems.append("panel_url is required for Pterodactyl servers")
-        if not cfg["api_key"] or "xxxx" in cfg["api_key"]:
+        if not cfg["api_key"] or "xxxx" in cfg["api_key"] or "PASTE" in cfg["api_key"].upper():
             problems.append("api_key (or PTERODACTYL_API_KEY) is required for Pterodactyl servers")
+        if "YOUR-PANEL" in cfg["panel_url"].upper():
+            problems.append("panel_url still has the placeholder: set it to your panel's address")
+    for i, server in enumerate(cfg["servers"]):
+        if "PASTE" in str(server.get("id", "")).upper():
+            problems.append(f"servers[{i}].id still has the placeholder: use the server's id from its panel URL")
+    if "PASTE" in str(cfg["webhook_url"]).upper():
+        problems.append("webhook_url still has the placeholder: paste the Discord webhook URL or set it to \"\"")
     if problems:
         sys.exit("Config problems:\n  - " + "\n  - ".join(problems))
     return cfg

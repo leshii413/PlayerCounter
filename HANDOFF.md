@@ -5,11 +5,11 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 12:10 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 13:05 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
-A BeamMP Server 3.x **server-side Lua plugin** (`main.lua`) by Leshii413 that tracks player analytics for BeamMP servers: unique players, join sessions, new/returning players, month-over-month retention, playtime (2.0.1, AFK excluded since 2.1.0), and players online (peaks, averages, weekday-hour heatmap, 24 h graph; 2.1.0). It writes a live snapshot of who is online, which a separate Python script (`discord/discord_status.py`) turns into a live Discord status message per server. An optional client mod (`client/`) reports which vehicle each player is actually in. A PHP stats website (`web/`, planned for **stats.baja75series.org** on the owner's Namecheap shared hosting) shows live players, graphs, heatmap, numbers and per-server + series-wide playtime leaderboards; the Discord script uploads to it.
+A BeamMP Server 3.x **server-side Lua plugin** (`main.lua`) by Leshii413 that tracks player analytics for BeamMP servers: unique players, join sessions, new/returning players, month-over-month retention, playtime (2.0.1, AFK excluded since 2.1.0), and players online (peaks, averages, weekday-hour heatmap, 24 h graph; 2.1.0). It writes a live snapshot of who is online, which a separate Python script (`discord/discord_status.py`) turns into a live Discord status message per server. An optional client mod (`client/`) reports which vehicle each player is actually in. A PHP stats website (`web/`, planned for **stats.baja75series.org** on the owner's Namecheap shared hosting) shows live players, graphs, heatmap, numbers and per-server + series-wide playtime leaderboards; each BeamMP server uploads to it by itself (`data/website.json`, curl, HMAC signed in Lua); the Discord script can upload instead.
 
 Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools Landscape & PlayerCounter Roadmap" (https://claude.ai/artifact/PiRfqZkrXfvJpy3EbxK8Js, private to the owner). Summary: nothing else does long-term analytics for BeamMP; Discord bots (DiscordGSM/GameServerMonitor, BeamMP Stats, BEAMER, BeamMP Status) only read the public server list; panels (beamng-server-panel is the closest, same file-bridge design, restrictive license) focus on moderation.
 
@@ -27,7 +27,7 @@ Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools L
 | Plugin version | 2.1.0 on `playercounter-2.1` (`PLUGIN_VERSION` in `main.lua`); Discord script 2.1.0; `live.json` schema 2. |
 | Tested offline | Yes: 45/45 + 49/49 plugin checks (BeamMP mock, Lua 5.3), 7/7 client-mod checks (LuaJIT, stubbed game API), Discord script end to end vs fake panel + fake Discord incl. multipart graph upload, website end to end 20/20 (PHP 8.3 built-in server; content, privacy, merging, forged/old/replayed uploads), page screenshots desktop/mobile/dark with no console errors or horizontal scroll. |
 | Tested live | **No.** Never run on a real BeamMP server, Pterodactyl panel, BeamNG client, Discord or Namecheap hosting. First live test is the top open item. |
-| Website hosting | Owner said baja75series.org is on **Namecheap shared hosting** (cPanel); stats.baja75series.org not created yet (owner does this, steps in `web/README.md`). |
+| Website hosting | Owner said baja75series.org is on **Namecheap shared hosting** (cPanel); stats.baja75series.org not created yet. Owner received ready-to-extract zips (2026-10-27): `stats.baja75series.org-site.zip` (site + filled `config.php`) and `BeamMP-server-files.zip` (main.lua, `data/website.json`, client mod) plus `SETUP-INSTRUCTIONS.md`. The shared secret exists **only in those zips** (generated in-session, never committed, not in the Project or memory); a new session cannot recover it and should generate a new one for both sides if needed. |
 
 ## 3. File map
 
@@ -45,7 +45,8 @@ web/public/ingest.php            receives signed uploads from discord_status.py
 web/public/lib.php               shared PHP helpers (blocked by .htaccess)
 web/public/config.sample.php     settings template -> config.php (git-ignored)
 web/public/.htaccess, data/.htaccess   block config/lib/data, force HTTPS, CSP + security headers
-tests/run_web_test.sh            website e2e: script -> PHP built-in server -> api.php checks (20)
+tests/run_web_test.sh            website e2e: script -> PHP built-in server -> api.php checks (20); with LUA+MOCK_BEAMMP also runs tests/web_push_test.lua
+tests/web_push_test.lua          plugin's own upload via curl to the PHP test site (9 checks incl. wrong secret, shell injection)
 tests/plugin_test.lua            45 offline checks for main.lua (2.0.1 behaviour)
 tests/plugin_test_21.lua         40 offline checks for 2.1 (concurrency, heatmap, graph, AFK, active vehicle)
 tests/run_plugin_tests.sh        runs every tests/plugin_test*.lua: LUA=lua5.3 MOCK_BEAMMP=/path/mock_beammp.lua tests/run_plugin_tests.sh
@@ -96,7 +97,8 @@ Resources/Server/PlayerCounter/data/
 - Servers may instead use `"live_json_file": "/local/path"` (no panel).
 - Graph (2.1): `graph_series(live)` reads `online_24h`; `render_graph()` draws a 720×160 transparent PNG step chart with stdlib (`zlib`, `struct`), grid at nice_max/4 steps and dotted ticks every 3 h; sent as multipart (`payload_json` + `files[0]`, `attachments:[{id:0,filename:"players_24h.png"}]`, embed `image.url = attachment://players_24h.png`). Without a graph the payload sends `attachments: []` so an old image is removed. Caption uses `<t:unix:t>` so viewers see their own time zone. `--dry-run` writes `preview_<server>.png` to the working directory.
 - Player line (2.1): `current_vehicle_text()` prefers `active_vehicle` (own → car, else "watching <owner> (car)"), falls back to spawned vehicles; AFK adds "AFK <idle>".
-- Website upload (2.1): when `website_url` is set, every refresh POSTs `{"server":{key,name,connect,order},"panel_state","error","uptime_ms","live"}` to `ingest.php` with headers `X-PlayerCounter-Timestamp` and `X-PlayerCounter-Signature: sha256=HMAC_SHA256(secret, "<ts>.<body>")`. A failed upload is logged and never blocks Discord. `site_key` per server (else slug of id); `website_url` must be https (localhost allowed for tests); servers without `webhook_url` only update the site.
+- Plugin website upload (2.1, preferred): `data/website.json` = `{url, secret}` (+ optional `server_name`, `server_key`, `connect`, `order`, `interval_seconds`); `loadWebsite()` at init validates the URL pattern (https://host/path only; quotes impossible), secret ≥ 24, `command -v curl`; key defaults to a slug of the BeamMP server name (colour codes stripped). `writeLive()` builds the snapshot (`buildSnapshot`) and calls `pushWebsite()` every `interval` (60 s), when the player count changed (≥ 5 s since last), and forced at init and shutdown (`panel_state` "offline", waits up to 5 s). Body written to `data/website_upload.json`, signed with `hmacSha256Hex` (pure Lua 5.3 SHA-256, verified on 46 vectors against Python), sent with `curl ... > data/website_status.txt &`; `checkWebsiteReply()` logs `Website upload OK.` / `website upload failed (HTTP n): <reply>` when the status changes. Pterodactyl debian yolks include curl + ca-certificates.
+- Script website upload (2.1, alternative): when `website_url` is set, every refresh POSTs `{"server":{key,name,connect,order},"panel_state","error","uptime_ms","live"}` to `ingest.php` with headers `X-PlayerCounter-Timestamp` and `X-PlayerCounter-Signature: sha256=HMAC_SHA256(secret, "<ts>.<body>")`. A failed upload is logged and never blocks Discord. `site_key` per server (else slug of id); `website_url` must be https (localhost allowed for tests); servers without `webhook_url` only update the site.
 
 **Website (`web/public`, PHP 7.4+, no database):**
 - `ingest.php`: POST only, body ≤ 2 MB, signature via `hash_equals`, timestamp within ±300 s and newer than the stored `received_ts` (replay), key `^[a-z0-9][a-z0-9_-]{0,39}$`; writes `data_dir/server-<key>.json` atomically under `flock`.
@@ -133,12 +135,15 @@ Resources/Server/PlayerCounter/data/
 | D24 | One playtime credit is capped at 3 timer intervals. | Found by a test: a frozen server or clock jump would otherwise add the whole gap as playtime. |
 | D25 | The website ships inside 2.1.0 / PR #3 rather than a separate branch. | 2.1.0 is unreleased; one PR to review is simpler for the owner. |
 | D26 | Page design: race-plate look (yellow class plates, condensed door-number type) instead of a generic dashboard. | Specific to Baja racing; documented palette/type in the Website architecture notes. |
+| D27 | The site secret was generated in-session and delivered only inside the owner's zips; never committed, mirrored or remembered. | It authorises uploads; the repo is public. |
+| D28 | Each BeamMP server uploads to the site itself (Lua HMAC + background curl) instead of relying on the Discord script; the server zip is identical for all servers (name/key from the BeamMP server name). Supersedes D22 as the default path; the script upload remains as an alternative (use one per server). | Owner asked for "no editing, ready to upload"; the script needs panel URL/API key/server ids only the owner has. |
+| D29 | `stale_after_seconds` default 300 (plugin uploads every 60 s + on joins/leaves); 900 only when the script uploads. | Faster "No recent data" when a server dies. |
 
 ## 6. Open items / next steps
 
 1. **First live test** on one server: install the plugin (2.1.0), check `[PlayerCounter] PlayerCounter 2.1.0 loaded`, join, run `pc.online`, `pc.peak`, confirm `data/live.json` updates; park for 5+ min and confirm AFK.
 2. **Client mod live test**: copy `playercounter.zip` to `Resources/Client/`, rejoin, switch vehicles and spectate another player; `pc.online` should show "driving" / "watching". Uses `MPVehicleGE.getServerVehicleID` and `getPlayerVehicle(0)`; not yet run in BeamNG.
-3. **Website live setup** (owner): create stats.baja75series.org in cPanel, upload `web/public`, set `config.php` secret (ideally `data_dir` outside the web folder), set `website_url`/`website_secret` in `discord_status.json`, run `--once`; then check `/config.php`, `/data/`, `/lib.php` are blocked. Free SSL is automatic for the first year only, then renewed through Namecheap. If ModSecurity blocks POSTs, Namecheap support must allow `ingest.php`.
+3. **Website live setup** (owner, following `SETUP-INSTRUCTIONS.md`): create stats.baja75series.org, extract the site zip; on each Pterodactyl BeamMP server unarchive `BeamMP-server-files.zip` and restart; expect `Website upload OK.`; then check `/config.php`, `/data/`, `/lib.php` are blocked. Optional later: `utc_offset_hours` 8 in each server's `data/config.json` (owner's old offset unknown; default UTC). Free SSL is automatic for the first year only, then renewed through Namecheap. If ModSecurity blocks POSTs, Namecheap support must allow `ingest.php`.
 4. **Discord script live test**: create `discord_status.json`, run `--once --dry-run` (writes a preview PNG), then `--once`; confirm the graph attachment replaces itself on edits (multipart PATCH with `attachments`, untested on real Discord) and subuser permissions (D13).
 5. Owner to review and merge PR #2, then PR #3 (or retarget #3 to `main`); tag `v2.0.1` / `v2.1.0` and attach `main.lua` + `playercounter.zip`.
 6. `weekly_push.py` is described in the install guide (sections 20–24, 26, 28) but **does not exist** in the repo. Roadmap item 9 proposes a weekly Discord summary instead; not started.

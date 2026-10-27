@@ -22,7 +22,7 @@ function pc_config()
         'secret' => '',
         'data_dir' => __DIR__ . '/data',
         'site_title' => 'Server stats',
-        'stale_after_seconds' => 900,
+        'stale_after_seconds' => 300,
         'show_player_names' => true,
         'leaderboard_size' => 15,
     ];

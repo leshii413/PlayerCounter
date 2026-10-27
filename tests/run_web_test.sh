@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end test of the stats website: discord_status.py pushes to web/public
 # (PHP built-in server) and api.php is checked for content and privacy.
-# Needs python3 and php (7.4+). Note: the PHP built-in server ignores
+# Needs python3, php (7.4+) and curl; with LUA + MOCK_BEAMMP set it also tests the plugin's own upload. Note: the PHP built-in server ignores
 # .htaccess, so the "data files are not downloadable" rule is not covered here.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -86,4 +86,14 @@ except urllib.error.HTTPError as e:
     check(e.code == 405, "GET on ingest rejected")
 sys.exit(1 if fails else 0)
 PY
+# The plugin's own upload (data/website.json + curl), if Lua 5.3 and the mock are available.
+if [ -n "${MOCK_BEAMMP:-}" ] && command -v "${LUA:-lua5.3}" >/dev/null 2>&1; then
+  mkdir -p "$WORK/server/Resources/Server/PlayerCounter"
+  cp "$HERE/../main.lua" "$WORK/server/Resources/Server/PlayerCounter/"
+  (cd "$WORK/server" && SITE_URL="http://127.0.0.1:8766/ingest.php" SITE_SECRET="$SECRET" \
+    MOCK_BEAMMP="$(cd "$(dirname "$MOCK_BEAMMP")" && pwd)/$(basename "$MOCK_BEAMMP")" \
+    TZ=UTC "${LUA:-lua5.3}" "$HERE/web_push_test.lua")
+else
+  echo "(skipping plugin upload test: set LUA and MOCK_BEAMMP)"
+fi
 echo "OK"
