@@ -388,8 +388,12 @@
   function render() {
     document.title = data.title;
     document.getElementById("site-title").textContent = data.title;
-    document.getElementById("updated").textContent = "Updated " + fmtTime(new Date(data.generated_unix * 1000), { hour: "numeric", minute: "2-digit" }) + " " + zoneName() + ", refreshes every minute";
-    document.getElementById("time-note").textContent = "Playtime counts time on a server minus time spent AFK. All times are " + zoneName() + ".";
+    var local = !data.display_time_zone;
+    document.getElementById("updated").textContent = "Updated " + fmtTime(new Date(data.generated_unix * 1000), { hour: "numeric", minute: "2-digit" }) +
+      (local ? "" : " " + zoneName()) + ", refreshes every minute";
+    document.getElementById("time-note").textContent = "Playtime counts time on a server minus time spent AFK. " +
+      (local ? "Times are shown in your own time zone; the activity grid uses each server's calendar, named under the grid."
+             : "All times are " + zoneName() + ".");
     renderPlates(data.servers);
     renderSeries(data.series);
     var box = document.getElementById("servers");

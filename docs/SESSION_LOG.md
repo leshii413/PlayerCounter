@@ -180,3 +180,20 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 - Website: `display_time_zone`/`display_time_zone_name` (config.php → api.php → page); graph ticks, peak and "Updated" use that zone; footer says which zone; empty message now refers to BeamMP servers, not the Discord script. Verified in Chromium from Singapore and Berlin: identical Utah times, peak matches Denver.
 - Rebuilt the zips with Utah preset: site `config.php` (`America/Denver`, "St George, Utah time"), server zip now also has `data/config.json` (`-7`, `"us"`, "St George, Utah time"). Updated SETUP-INSTRUCTIONS.md.
 - Tests: plugin 45/45, 49/49, 192/192; web 20/20 + 9/9; Discord OK; client 7/7. Docs updated, pushed to PR #3, mirrored.
+
+### Prompt 17 (2026-10-27 13:54)
+
+> what files here were original to the filemanager and not added by unpacking
+
+(with a screenshot of the cPanel File Manager listing for the subdomain folder)
+
+**Answered**: `.well-known` and `cgi-bin` were created by cPanel with the subdomain (keep `.well-known`: SSL validation); everything else came from the site zip. The listing still showed the pre-time-zone files (config.php 811 bytes), so the owner was told to re-extract the latest zip.
+
+### Prompt 18 (2026-10-27 13:57)
+
+> Adjust timezone to reflect the timezone of the person viewing the page
+
+**Decided**: D32 (website times in each visitor's own time zone; servers keep the St George calendar for day/month rollover and the heatmap). Supersedes the website half of D31.
+
+**Done**
+- Owner's site `config.php`: `display_time_zone` empty. `app.js`: with no display zone, the header shows just the time and the footer says times are in the visitor's own zone while the activity grid uses each server's calendar (named under the grid). Verified in Chromium from Singapore (1:58 PM) and New York (1:58 AM). Rebuilt and re-sent `stats.baja75series.org-site.zip`; server zip unchanged.

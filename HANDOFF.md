@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 14:00 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 14:05 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
@@ -141,6 +141,7 @@ Resources/Server/PlayerCounter/data/
 | D29 | `stale_after_seconds` default 300 (plugin uploads every 60 s + on joins/leaves); 900 only when the script uploads. | Faster "No recent data" when a server dies. |
 | D30 | The website footer credits "By Leshii413" linking to https://www.patreon.com/Leshii413; no GitHub link on the page. | Owner's request (2026-10-27). |
 | D31 | Time zone = St George, Utah (US Mountain): plugin `utc_offset_hours` -7 + `dst` "us" (new US/EU DST rules in Lua, `time_zone_name`); website shows all times in `America/Denver` for every visitor (`display_time_zone`). Both preset in the owner's zips (server zip now ships `data/config.json`; re-extracting it overwrites that file). | Owner's request (2026-10-27); a fixed offset would be an hour off half the year. |
+| D32 | Website shows times in each visitor's own time zone (`display_time_zone` empty in the owner's config.php); the plugin calendar stays St George, Utah (heatmap labelled with it). Supersedes the website half of D31. | Owner's request (2026-10-27 13:57). |
 
 ## 6. Open items / next steps
 
