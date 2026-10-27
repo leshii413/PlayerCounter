@@ -5,12 +5,12 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 14:45 (session 1 handing over) (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 14:45 (session 1; 2.1.0 merged to main) (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 0. Taking over? Start here
 
 1. Read §2 (state) and §6 (open items); skim the decision table in §5 (D1–D33) before changing behaviour.
-2. Branches: `playercounter-2.0.1` (PR #2 → `main`) and `playercounter-2.1` (PR #3, stacked on #2). Work on a new branch off `playercounter-2.1` unless the owner has merged by then; check with `gh api repos/leshii413/PlayerCounter/pulls`.
+2. `main` holds 2.1.0 (PRs #2 and #3 merged 2026-10-27). Start new work on a branch off `main` and open a PR; check open PRs with `gh api repos/leshii413/PlayerCounter/pulls`.
 3. Set up the test tools (§7): Lua 5.3 build, the `beamng-beammp-dev` skill's `mock_beammp.lua`, LuaJIT, PHP 7.4+, Python 3. Run every suite before and after your change.
 4. The owner wants ready-to-upload packages with **no editing**. To rebuild them after a change use `tools/build_deploy_zips.sh` (needs the owner's secret in `PC_SECRET`; without it a new secret is generated and BOTH zips must be redeployed). Deliver the zips privately; never commit them.
 5. Follow `CLAUDE.md` on every push (session log + this file + mirror to the claude.ai Project).
@@ -29,9 +29,8 @@ Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools L
 
 | Item | State |
 |---|---|
-| `main` on GitHub | Still the original 2.0.0 code (commit `d878b57`). |
-| Branch `playercounter-2.0.1` | 2.0.1 work + handoff system. **PR #2** https://github.com/leshii413/PlayerCounter/pull/2 (base `main`), open. |
-| Branch `playercounter-2.1` | 2.1.0 work incl. the stats website, stacked on `playercounter-2.0.1`. **PR #3** https://github.com/leshii413/PlayerCounter/pull/3 (base `playercounter-2.0.1`; retarget to `main` after #2 merges, or merge #2 then #3). |
+| `main` on GitHub | **PlayerCounter 2.1.0** (merge commit `bd849c1`, PR #3) on top of 2.0.1 (merge commit `fa16576`, PR #2), merged 2026-10-27 at the owner's request. Old branches `playercounter-2.0.1` / `playercounter-2.1` are kept but done. |
+| Tags / releases | **Not created**: this session type can't push tags or create releases (HTTP 403). Owner to create `v2.0.1` at `fa16576` and `v2.1.0` at `bd849c1` on GitHub (Releases → Draft a new release), using `docs/RELEASE_NOTES_v2.1.0.md` and attaching `PlayerCounter-2.1.0.zip`. |
 | Plugin version | 2.1.0 on `playercounter-2.1` (`PLUGIN_VERSION` in `main.lua`); Discord script 2.1.0; `live.json` schema 2. |
 | Tested offline | Yes: 45/45 + 49/49 plugin checks (BeamMP mock, Lua 5.3), 7/7 client-mod checks (LuaJIT, stubbed game API), Discord script end to end vs fake panel + fake Discord incl. multipart graph upload, website end to end 20/20 (PHP 8.3 built-in server; content, privacy, merging, forged/old/replayed uploads), page screenshots desktop/mobile/dark with no console errors or horizontal scroll. |
 | Tested live | **Partly.** The website is live on Namecheap and at least one BeamMP server uploads to it with the St George calendar (2026-10-27). Not yet live-tested: the client mod in BeamNG, AFK in real play, and the Discord status script. |
@@ -55,6 +54,7 @@ client/lua/ge/extensions/playerCounter/client.lua    client mod: reports the act
 client/build_zip.sh              builds client/playercounter.zip (git-ignored) -> server Resources/Client/
 tools/build_deploy_zips.sh       builds the owner's two private ready-to-extract zips (PC_SECRET env; output deploy-out/, git-ignored)
 docs/SETUP-INSTRUCTIONS.md       owner-facing upload steps for those zips (Namecheap + Pterodactyl)
+docs/RELEASE_NOTES_v2.1.0.md     text for the v2.1.0 GitHub release (owner creates it)
 web/README.md                    Namecheap setup guide for the stats website (subdomain, SSL, upload, secret, checks)
 web/public/index.html, style.css, app.js   the page (vanilla JS, renders api.php, refreshes every minute)
 web/public/api.php               public JSON: servers cleaned of IDs + merged series leaderboards
@@ -167,7 +167,7 @@ Resources/Server/PlayerCounter/data/
 2. **Client mod live test**: copy `playercounter.zip` to `Resources/Client/`, rejoin, switch vehicles and spectate another player; `pc.online` should show "driving" / "watching". Uses `MPVehicleGE.getServerVehicleID` and `getPlayerVehicle(0)`; not yet run in BeamNG.
 3. ~~Website live setup~~ **Done 2026-10-27**: stats.baja75series.org is live. If more BeamMP servers are added, they only need `BeamMP-server-files.zip` (each appears under its BeamMP server name; keep names unique).
 4. **Discord script live test**: create `discord_status.json`, run `--once --dry-run` (writes a preview PNG), then `--once`; confirm the graph attachment replaces itself on edits (multipart PATCH with `attachments`, untested on real Discord) and subuser permissions (D13).
-5. Owner to review and merge PR #2, then PR #3 (or retarget #3 to `main`); tag `v2.0.1` / `v2.1.0` and attach `main.lua` + `playercounter.zip`.
+5. ~~Merge PR #2 then #3~~ **Done 2026-10-27** (#3 retargeted to `main`, both regular merge commits). Remaining for the owner: create the `v2.0.1` / `v2.1.0` tags and the 2.1.0 GitHub release (see the state table).
 6. `weekly_push.py` is described in the install guide (sections 20–24, 26, 28) but **does not exist** in the repo. Roadmap item 9 proposes a weekly Discord summary instead; not started.
 7. **Optional, owner said "nevermind" for now (2026-10-27): in-game vehicle names.** The site shows the model key + config (`TrackfabLightBuggy (DesertRacingSoloLimited)`) instead of the in-game name ("Trackfab Apache"). Plan if asked again: client mod reads names from `core_vehicles.getModelList().models[<model key>]` (confirmed in BeamMP's `MPVehicleGE.lua`, used as `vehiclesList.models[vehicleName]`; the entries come from each vehicle's `info.json` "Brand"/"Name", config display name from `info_<config>.json` "Configuration" — field names not yet verified in-game, code defensively with pcall), sends them with the active-vehicle report (bump payload to `"v":2`); server accepts a name only for a model that player really has spawned (compare with `jbm` from `MP.GetPlayerVehicles`), sanitises (≤ 60 chars, no control/colour codes), caches per model in `stats.json`, lets `config.json` `vehicle_names` override, and adds `display_name` to live.json vehicles; site/Discord prefer it.
 8. Remaining roadmap (research doc): BeamJoy race/event stats, better retention measures (second-session return, day-7/30, cohorts, activity labels), vehicle/mod usage stats, network-wide totals, milestone posts and offline role ping, player profiles + `/stats <player>`, friend alerts, scheduled messages, privacy tools, public stats page; plus improvements: split `joins.csv` monthly, move player records out of `stats.json`, DST-aware calendar, uptime/unclean-shutdown tracking, public server list fallback in the Discord script.
