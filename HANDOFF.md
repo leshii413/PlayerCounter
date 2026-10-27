@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 13:05 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 13:40 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
@@ -138,6 +138,7 @@ Resources/Server/PlayerCounter/data/
 | D27 | The site secret was generated in-session and delivered only inside the owner's zips; never committed, mirrored or remembered. | It authorises uploads; the repo is public. |
 | D28 | Each BeamMP server uploads to the site itself (Lua HMAC + background curl) instead of relying on the Discord script; the server zip is identical for all servers (name/key from the BeamMP server name). Supersedes D22 as the default path; the script upload remains as an alternative (use one per server). | Owner asked for "no editing, ready to upload"; the script needs panel URL/API key/server ids only the owner has. |
 | D29 | `stale_after_seconds` default 300 (plugin uploads every 60 s + on joins/leaves); 900 only when the script uploads. | Faster "No recent data" when a server dies. |
+| D30 | The website footer credits "By Leshii413" linking to https://www.patreon.com/Leshii413; no GitHub link on the page. | Owner's request (2026-10-27). |
 
 ## 6. Open items / next steps
 

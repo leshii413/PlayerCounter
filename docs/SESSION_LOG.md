@@ -149,3 +149,12 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 - Tests: new `tests/web_push_test.lua` (9/9) inside `tests/run_web_test.sh` (20/20 + OK); plugin 45/45 and 49/49; Discord e2e OK. Confirmed the Pterodactyl debian yolks ship curl.
 - Built and acceptance-tested the owner's zips together (extracted as uploaded; only the URL pointed at a local copy): `stats.baja75series.org-site.zip`, `BeamMP-server-files.zip`, plus `SETUP-INSTRUCTIONS.md` (Namecheap + Pterodactyl steps, console lines to expect, troubleshooting). The secret is only in those zips.
 - Docs: README, web/README (plugin upload is the default; script upload as alternative), CHANGELOG, config.sample.php. Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log.
+
+### Prompt 13 (2026-10-27 13:35)
+
+> i dont want the link to github on the playercounter webpage that shows on the website, just say by Leshii413 and have it linked to the patreon Leshii413
+
+**Decided**: D30 (website credit = "By Leshii413" linking to https://www.patreon.com/Leshii413; no GitHub link on the page).
+
+**Done**
+- `web/public/index.html` footer now reads "By Leshii413. Data refreshes every minute." with the Patreon link (the Patreon page couldn't be fetched from the session to confirm the address; standard vanity URL used). Rebuilt `stats.baja75series.org-site.zip` (same config.php/secret) and re-sent it. Footer checked in Chromium.
