@@ -62,3 +62,192 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 **Done**
 - Added `HANDOFF.md`, `docs/SESSION_LOG.md`, `CLAUDE.md`, `tests/` (plugin test, runners, fake panel/Discord, sample live.json, test config). Both test suites re-run from the repo: 45/45 and OK.
 - Pushed to `playercounter-2.0.1` (updates PR #2) and wrote the Project docs.
+
+---
+
+## Session 1, part 2: 2026-10-27
+
+- Same Claude Code cloud session (`session_01YMAAefrrzE187RmbqyseJo`), resumed after nine days; attached to the claude.ai Project "Player Counter v2.0.1".
+
+### Prompt 5 (2026-10-27 11:17)
+
+> research for similiar projects for this game, fr multiplayer, list features to be added and what we cna improve on
+
+**Done**
+- Web research on BeamMP plugins, bots and panels, plus analytics tools in other games (Plan for Minecraft, txAdmin for FiveM, sTracker for Assetto Corsa, BattleMetrics/GameTracker, DiscordGSM).
+- Answered in chat with a prioritised feature list (15 items) and improvements to 2.0.1. Recommended items 1, 2, 3 and 6 as 2.1.
+
+### Prompt 6 (2026-10-27 11:27)
+
+> reattempt all failed
+
+**Done**
+- Retried the six sources that failed. Blocked GitHub pages were read by cloning the public repos (DiscordGSM/GameServerMonitor, levg34/beammp-admin, ayozetr/beamng-server-panel, A-Morgoth/AdminMP). The BeamMP public server list URL stayed blocked; its fields were taken from GameServerMonitor's `beammp.py` (ip, port, sname, map, players, maxplayers, playerslist `;`-separated, password). tracker.gg still failed (irrelevant: Steam population only).
+- Correction to prompt 5's answer: there **are** BeamMP Discord bots (GameServerMonitor, BeamMP Stats, BEAMER, BeamMP Status), all limited to the public list. beamng-server-panel is the closest project (same Lua file-bridge design, connection history, moderation; dropped leaderboards; restrictive license, ideas only). Added roadmap ideas: friend alerts, down alerts with role ping, joins-in-24h, staff notes, scheduled messages.
+
+### Prompt 7 (2026-10-27 11:29)
+
+> Create a Claude Doc from your last answer.
+
+**Done**
+- Created the claude.ai doc "BeamMP Tools Landscape & PlayerCounter Roadmap" (https://claude.ai/artifact/PiRfqZkrXfvJpy3EbxK8Js): summary, bots table, panels, public list fields, positioning (D14), 15-item roadmap, improvements, sources.
+
+### Prompt 8 (2026-10-27 11:30, sent while prompt 7 was running)
+
+> continue work
+
+**Decided**: D15–D20 in HANDOFF.md (build 2.1.0 = roadmap items 1, 2, 3, 6; server-side AFK; optional untrusted client mod for the current vehicle; plugin keeps the 24 h graph data, script draws the PNG with stdlib; additive live.json schema 2; stacked branch/PR).
+
+**Done**
+- `main.lua` 2.1.0: peak/average players online per day/month/year (short peaks caught at join), 168-slot weekday-hour heatmap per month, 24 h graph buckets (`online_24h`), joins in last 24 h, AFK detection (positions via `MP.GetPositionRaw`, `afk_*` settings, `afk_seconds`), `PlayerCounter_activeVehicle` handler with validation, `pc.peak`, `pc.heatmap`, richer `pc.online`, `pc.month` peak/average, `/playerstats` headline line, live.json schema 2.
+- Client mod `client/` (`playerCounter_client`): checks every 2 s, sends the camera vehicle's server id on change and once a minute; `client/build_zip.sh`.
+- `discord/discord_status.py` 2.1.0: stdlib PNG step chart of the last 24 h attached via multipart, caption with `<t:unix:t>` peak time, driving/watching/AFK in player lines, Today peak, `show_graph`, `--dry-run` writes a preview PNG. Viewed the rendered graph on a Discord-dark background: correct.
+- Tests: new `tests/plugin_test_21.lua` (40 checks), `tests/client_test.lua` (7, LuaJIT), runner now runs every `plugin_test*.lua`, fake Discord parses multipart and the e2e test asserts graphs. Results: 45/45, 40/40, 7/7, Discord e2e OK. Three test-side mistakes fixed on the way (old 5-line expectation, AFK switching-tick arithmetic, Lua pattern `-` in `find`); no plugin bugs found.
+- README, CHANGELOG (2.1.0), Full Installation Guide (client mod, AFK settings, new commands), HANDOFF updated.
+- Pushed branch `playercounter-2.1` and opened PR #3 (base `playercounter-2.0.1`); mirrored HANDOFF and this log to the Project.
+
+### Prompt 9 (2026-10-27 11:47)
+
+> i would like for this to work with a subdomain on namecheap via baja75series.org
+> stats.baja75series.org can be the subdomain if it permits me to make one
+
+**Asked** (two multiple-choice questions) and the owner answered:
+- Where is baja75series.org hosted? → **Namecheap shared hosting**
+- What should the public page show? → **Everything + leaderboards** (live players, graphs, plus top playtime per server and across the series)
+
+**Found**: Namecheap allows subdomains (up to 800 per domain on BasicDNS; with Namecheap hosting DNS they are created in cPanel) and auto-installs a free SSL certificate for a new subdomain on shared hosting for the first year.
+
+**Decided**: D21–D26 in HANDOFF.md (PHP + JSON site on Namecheap; the Discord script pushes signed uploads; IDs used only for merging; playtime credit cap; website inside 2.1.0 / PR #3; race-plate design).
+
+**Done**
+- Plugin: `leaderboard_size` (25), `month_playtime_seconds`, `leaderboard` + `calendar_utc_offset_hours` in live.json, `pc.top [N] [month]`, playtime credit capped at 3 intervals (a leaderboard test showed a clock jump crediting 1.5 days). Old test clock changed to tick every 30 s (it jumped an hour at once, which the cap now treats as a frozen server).
+- `web/`: `ingest.php` (signed uploads), `api.php` (public JSON, IDs stripped, series merge), `index.html`/`style.css`/`app.js` (race-plate page), `.htaccess` protection, `config.sample.php`, `web/README.md` Namecheap guide.
+- `discord_status.py`: `website_url`, `website_secret`/`PLAYERCOUNTER_WEBSITE_SECRET`, `site_key`; website-only mode without a webhook.
+- Tests: plugin 45/45 + 49/49, client 7/7, Discord e2e OK, new `tests/run_web_test.sh` 20/20 OK. Screenshots (desktop, mobile, dark): fixed an empty numbers table on offline servers, a repeated error message, small chart labels, the footer rule, inline styles blocked by the CSP, and mid-word name breaks on mobile (rows now stack).
+- Pushed to `playercounter-2.1` (PR #3 updated) and mirrored HANDOFF and this log to the Project.
+
+### Prompt 10 (2026-10-27 12:37)
+
+> set up the config.php ready to go for me to add
+
+**Done**
+- Generated a 48-character secret and a filled `config.php` (`data_dir` one level above the site folder, title "BAJA75SERIES server stats") plus the matching `discord_status.json` lines; tested a signed upload against it locally. Delivered as files only (D27).
+
+### Prompt 11 (2026-10-27 12:52)
+
+> set up the full zip for ready to just extract in the file manager for the site. add instructions for what is needed to be added to the beammp server
+
+### Prompt 12 (2026-10-27 12:53, sent while prompt 11 was running)
+
+> no editing, ready to upload
+
+**Decided**: D28 (plugin uploads to the site itself so the server zip needs no edits), D29 (stale after 300 s).
+
+**Done**
+- `main.lua`: pure-Lua SHA-256/HMAC (46/46 vectors match Python), `data/website.json` settings, background curl upload every 60 s, on joins/leaves (≥ 5 s apart), at init and on shutdown (marks offline), result logging, URL validation against shell injection; `buildSnapshot()` split from `writeLive()`.
+- `discord_status.py`: placeholder values (`PASTE...`, `YOUR-PANEL`) reported as missing settings.
+- Tests: new `tests/web_push_test.lua` (9/9) inside `tests/run_web_test.sh` (20/20 + OK); plugin 45/45 and 49/49; Discord e2e OK. Confirmed the Pterodactyl debian yolks ship curl.
+- Built and acceptance-tested the owner's zips together (extracted as uploaded; only the URL pointed at a local copy): `stats.baja75series.org-site.zip`, `BeamMP-server-files.zip`, plus `SETUP-INSTRUCTIONS.md` (Namecheap + Pterodactyl steps, console lines to expect, troubleshooting). The secret is only in those zips.
+- Docs: README, web/README (plugin upload is the default; script upload as alternative), CHANGELOG, config.sample.php. Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log.
+
+### Prompt 13 (2026-10-27 13:35)
+
+> i dont want the link to github on the playercounter webpage that shows on the website, just say by Leshii413 and have it linked to the patreon Leshii413
+
+**Decided**: D30 (website credit = "By Leshii413" linking to https://www.patreon.com/Leshii413; no GitHub link on the page).
+
+**Done**
+- `web/public/index.html` footer now reads "By Leshii413. Data refreshes every minute." with the Patreon link (the Patreon page couldn't be fetched from the session to confirm the address; standard vanity URL used). Rebuilt `stats.baja75series.org-site.zip` (same config.php/secret) and re-sent it. Footer checked in Chromium.
+
+### Prompt 14 (2026-10-27 13:47)
+
+> i want timezone to be St George's timezone
+
+Asked which St George's (Grenada, Bermuda or Utah); the owner interrupted with:
+
+### Prompt 15 (2026-10-27 13:47)
+
+> utah
+
+### Prompt 16 (2026-10-27 13:48, sent while working)
+
+A screenshot of the live stats.baja75series.org page showing "On the dirt right now" and the empty message "No server has sent stats yet. Check that the Discord status script has website_url and website_secret set." (the site is up; no BeamMP server has uploaded yet).
+
+**Decided**: D31 (St George, Utah = US Mountain Time with US DST in the plugin; website shows America/Denver times for everyone).
+
+**Done**
+- `main.lua`: `dst` ("us"/"eu"/"none") and `time_zone_name`; `utc_offset_hours` is now the standard offset; `currentOffsetHours()` drives period keys, heatmap, labels and `live.json` (`calendar_utc_offset_hours`, `calendar_name`). New `tests/plugin_test_tz.lua`: 192/192 cases from Python zoneinfo around every switch 2025–2030.
+- Website: `display_time_zone`/`display_time_zone_name` (config.php → api.php → page); graph ticks, peak and "Updated" use that zone; footer says which zone; empty message now refers to BeamMP servers, not the Discord script. Verified in Chromium from Singapore and Berlin: identical Utah times, peak matches Denver.
+- Rebuilt the zips with Utah preset: site `config.php` (`America/Denver`, "St George, Utah time"), server zip now also has `data/config.json` (`-7`, `"us"`, "St George, Utah time"). Updated SETUP-INSTRUCTIONS.md.
+- Tests: plugin 45/45, 49/49, 192/192; web 20/20 + 9/9; Discord OK; client 7/7. Docs updated, pushed to PR #3, mirrored.
+
+### Prompt 17 (2026-10-27 13:54)
+
+> what files here were original to the filemanager and not added by unpacking
+
+(with a screenshot of the cPanel File Manager listing for the subdomain folder)
+
+**Answered**: `.well-known` and `cgi-bin` were created by cPanel with the subdomain (keep `.well-known`: SSL validation); everything else came from the site zip. The listing still showed the pre-time-zone files (config.php 811 bytes), so the owner was told to re-extract the latest zip.
+
+### Prompt 18 (2026-10-27 13:57)
+
+> Adjust timezone to reflect the timezone of the person viewing the page
+
+**Decided**: D32 (website times in each visitor's own time zone; servers keep the St George calendar for day/month rollover and the heatmap). Supersedes the website half of D31.
+
+**Done**
+- Owner's site `config.php`: `display_time_zone` empty. `app.js`: with no display zone, the header shows just the time and the footer says times are in the visitor's own zone while the activity grid uses each server's calendar (named under the grid). Verified in Chromium from Singapore (1:58 PM) and New York (1:58 AM). Rebuilt and re-sent `stats.baja75series.org-site.zip`; server zip unchanged.
+
+### Prompt 19 (2026-10-27 14:10)
+
+(a screenshot of the live site's "When people play" heatmap: all hours striped except one dark square on Tuesday 00:00, legend "The busiest hour averages 1.0 players; times in St George, Utah time, UTC-6")
+
+**Found**: a BeamMP server is uploading with the St George calendar. Bug: when every recorded hour averages 0 players, the page used 1 as the colour scale and printed that 1 as the busiest-hour average.
+
+**Done**
+- `app.js`: the scale fallback is never shown; the legend says "No players online in the hours recorded so far" when all recorded hours are 0, otherwise "The busiest hour so far averages N players", and explains that striped hours aren't recorded yet. Checked in Chromium with an all-zero server and a busy one. Rebuilt and re-sent the site zip.
+
+### Prompt 20 (2026-10-27 14:11, sent while prompt 19 was being fixed)
+
+> time zones relative to user accessing site. any time mentions are based on visiting user data of the website
+
+**Decided**: D33 (every time shown on the site follows the visitor's time zone, including the heatmap and "last seen" dates; only the Today/month/year totals stay on the server calendar, labelled as such).
+
+**Done**
+- `app.js`: heatmap rotated from the server calendar into the visitor's zone (`viewerOffsetHours()`, half-hour zones round to the nearest hour), legend says "your local time"; leaderboard "last seen" shown as the visitor's local date; numbers note says Today/month/year are counted on the server's calendar; footer "All times are shown in your own time zone."
+- `api.php`: `last_seen` now the full UTC timestamp (validated format) instead of a UTC date.
+- Verified in Chromium: 168/168 cells correct for Singapore (+0 h), New York (−12 h) and Kolkata (−2 h) against a sample in a UTC+8 server calendar. `tests/run_web_test.sh` updated (last_seen) and passing. Rebuilt and re-sent the site zip.
+
+### Prompt 21 (2026-10-27 14:22)
+
+> finish work
+
+**Done**
+- Final check: the owner's ready zips match the repo (main.lua, client mod and every site file); all suites pass (plugin 45/45, 49/49, 192/192; client 7/7; Discord e2e OK; website 20/20 + plugin upload 9/9; PHP lint and JS syntax clean).
+- Docs aligned with visitor-local times (README, CHANGELOG, web/README, SETUP-INSTRUCTIONS.md).
+- Rebuilt the public release `PlayerCounter-2.1.0.zip` (plugin, client mod, Discord script, website with config.sample.php; verified it contains no secret). PR #3 description rewritten to cover all of 2.1.0.
+- Not done (needs the owner): merging PR #2 then PR #3 into `main` and tagging v2.0.1 / v2.1.0; live tests of the client mod and the Discord script.
+
+### Prompt 22 (2026-10-27 14:26)
+
+> I want what vehicle a player is using to be included, such as Trackfab Apache is the model name in game for the TrackfabLightBuggy
+
+**Started**: checked how to get in-game names; confirmed in BeamMP's client source (`MPVehicleGE.lua`) that `core_vehicles.getModelList().models[<model key>]` is the game's model registry. No files were changed.
+
+### Prompt 23 (2026-10-27 14:28, interrupting)
+
+(screenshot of the live site's "Who's on" table: `Leshii413 | TrackfabLightBuggy (DesertRacingSoloLimited) | 2m | 4h 45m`)
+
+> it shows it nevermind
+
+**Done**: stopped; nothing changed. The idea and its plan are kept as optional open item 7 in HANDOFF.md.
+
+### Prompt 24 (2026-10-27 14:33)
+
+> push updated files and handoff notes to repo for other claude to take over work
+
+**Done**
+- `tools/build_deploy_zips.sh`: rebuilds the owner's two private zips from the repo (secret via `PC_SECRET`, never stored; generates a new one if absent). Verified it reproduces the delivered zips file for file. `deploy-out/` git-ignored.
+- `docs/SETUP-INSTRUCTIONS.md`: copy of the owner-facing upload steps (no secret).
+- HANDOFF.md: new §0 "Taking over? Start here", live deployment notes (site live, server uploading, what the owner's screenshots confirmed), open items updated (live setup done; in-game vehicle names kept as optional with the API plan).
+- Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log to the claude.ai Project.

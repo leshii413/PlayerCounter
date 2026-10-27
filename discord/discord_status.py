@@ -9,7 +9,10 @@ servers whether it is running, reads the live snapshot that PlayerCounter
 Discord message per server up to date (edited in place, no channel spam):
 
     * online / offline / starting status and player count (x / max)
-    * every player online: name, session time, total playtime, vehicle(s)
+    * a 24 h player graph (attached PNG) with the peak time
+    * every player online: name, session time, playtime, the vehicle they are
+      driving or watching (with the optional client mod; else their spawned
+      vehicles) and an AFK marker
     * today / this month / all-time stats from PlayerCounter
 
 Needs only Python 3.8+ (standard library). Run it anywhere that can reach your
@@ -28,6 +31,7 @@ License: GPL-3.0, part of https://github.com/leshii413/PlayerCounter
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -36,10 +40,13 @@ import sys
 import time
 import urllib.error
 import urllib.parse
+import struct
 import urllib.request
+import uuid
+import zlib
 from datetime import datetime, timezone
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 USER_AGENT = "PlayerCounter-DiscordStatus/" + VERSION
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,6 +59,9 @@ DEFAULTS = {
     "stale_after_seconds": 180,
     "show_beammp_ids": False,
     "show_stats": True,
+    "show_graph": True,
+    "website_url": "",
+    "website_secret": "",
     "max_players_listed": 30,
     "webhook_username": "Server Status",
     "webhook_avatar_url": "",
@@ -127,6 +137,7 @@ def load_config(path):
     cfg.update({k: v for k, v in loaded.items() if not k.startswith("_")})
     cfg["api_key"] = os.environ.get("PTERODACTYL_API_KEY") or cfg["api_key"]
     cfg["webhook_url"] = os.environ.get("DISCORD_WEBHOOK_URL") or cfg["webhook_url"]
+    cfg["website_secret"] = os.environ.get("PLAYERCOUNTER_WEBSITE_SECRET") or cfg["website_secret"]
     cfg["panel_url"] = str(cfg["panel_url"]).rstrip("/")
     cfg["interval_seconds"] = max(60, int(cfg["interval_seconds"]))
 
@@ -140,13 +151,27 @@ def load_config(path):
     for i, server in enumerate(cfg["servers"]):
         if not server.get("id") and not server.get("live_json_file"):
             problems.append(f"servers[{i}] needs \"id\" (Pterodactyl server id) or \"live_json_file\"")
-        if not (server.get("webhook_url") or cfg["webhook_url"]):
-            problems.append(f"servers[{i}] has no webhook_url and there is no global webhook_url")
+        if not (server.get("webhook_url") or cfg["webhook_url"] or cfg["website_url"]):
+            problems.append(f"servers[{i}] has no webhook_url and there is no global webhook_url or website_url")
+        if server.get("site_key") and not re.match(r"^[a-z0-9][a-z0-9_-]{0,39}$", str(server["site_key"])):
+            problems.append(f"servers[{i}].site_key must be 1-40 characters: a-z, 0-9, _ or -")
+    if cfg["website_url"]:
+        if not str(cfg["website_url"]).startswith(("https://", "http://127.0.0.1", "http://localhost")):
+            problems.append("website_url must start with https:// (the secret signs uploads, but the data itself should not travel unencrypted)")
+        if len(str(cfg["website_secret"])) < 24 or "CHANGE_ME" in str(cfg["website_secret"]):
+            problems.append("website_secret (or PLAYERCOUNTER_WEBSITE_SECRET) must be the same long secret as in the website's config.php")
     if any(s.get("id") for s in cfg["servers"]):
         if not cfg["panel_url"]:
             problems.append("panel_url is required for Pterodactyl servers")
-        if not cfg["api_key"] or "xxxx" in cfg["api_key"]:
+        if not cfg["api_key"] or "xxxx" in cfg["api_key"] or "PASTE" in cfg["api_key"].upper():
             problems.append("api_key (or PTERODACTYL_API_KEY) is required for Pterodactyl servers")
+        if "YOUR-PANEL" in cfg["panel_url"].upper():
+            problems.append("panel_url still has the placeholder: set it to your panel's address")
+    for i, server in enumerate(cfg["servers"]):
+        if "PASTE" in str(server.get("id", "")).upper():
+            problems.append(f"servers[{i}].id still has the placeholder: use the server's id from its panel URL")
+    if "PASTE" in str(cfg["webhook_url"]).upper():
+        problems.append("webhook_url still has the placeholder: paste the Discord webhook URL or set it to \"\"")
     if problems:
         sys.exit("Config problems:\n  - " + "\n  - ".join(problems))
     return cfg
@@ -180,13 +205,16 @@ class HttpError(Exception):
         self.retry_after = retry_after
 
 
-def http(method, url, headers=None, body=None, timeout=20):
+def http(method, url, headers=None, body=None, timeout=20, raw=None, content_type=None):
     data = None
     all_headers = {"User-Agent": USER_AGENT}
     all_headers.update(headers or {})
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         all_headers["Content-Type"] = "application/json"
+    elif raw is not None:
+        data = raw
+        all_headers["Content-Type"] = content_type
     request = urllib.request.Request(url, data=data, method=method, headers=all_headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -330,6 +358,129 @@ def num(value):
         return "0"
 
 
+# --------------------------------------------------------------------------
+# 24 h player graph (PNG drawn with the standard library only)
+# --------------------------------------------------------------------------
+
+GRAPH_FILE = "players_24h.png"
+GRAPH_W, GRAPH_H, GRAPH_PAD = 720, 160, 8
+GRID = (128, 128, 128, 70)
+LINE = (46, 204, 113, 255)
+AREA = (46, 204, 113, 64)
+
+
+def graph_series(live):
+    """Returns (values, start_unix, bucket_seconds) from live.json, or None."""
+    graph = live.get("online_24h") if isinstance(live, dict) else None
+    if not isinstance(graph, dict):
+        return None
+    values = []
+    for v in as_list(graph.get("values")):
+        try:
+            values.append(int(v))
+        except (TypeError, ValueError):
+            values.append(-1)
+    if not values or max(values) < 0:
+        return None
+    try:
+        return values, int(graph.get("start_unix") or 0), int(graph.get("bucket_seconds") or 300)
+    except (TypeError, ValueError):
+        return None
+
+
+def nice_max(peak):
+    """Axis top and grid step: 4 grid steps of 1, 2, 5, 10 ... players."""
+    for step in (1, 2, 5, 10, 20, 25, 50, 100):
+        if peak <= step * 4:
+            return step * 4, step
+    return peak, max(1, peak // 4)
+
+
+def png_bytes(width, height, pixels):
+    """pixels: bytearray of width*height RGBA."""
+    rows = bytearray()
+    stride = width * 4
+    for y in range(height):
+        rows.append(0)
+        rows.extend(pixels[y * stride:(y + 1) * stride])
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
+
+
+def render_graph(values, start_unix, bucket):
+    """Step chart of max players per bucket on a transparent background;
+    gaps (-1, server not running) are left empty."""
+    w, h, pad = GRAPH_W, GRAPH_H, GRAPH_PAD
+    pixels = bytearray(w * h * 4)
+    top, bottom = pad, h - 1 - pad
+    ymax, ystep = nice_max(max(1, max(values)))
+
+    def put(x, y, color):
+        if 0 <= x < w and 0 <= y < h:
+            i = (y * w + x) * 4
+            pixels[i:i + 4] = bytes(color)
+
+    def y_for(v):
+        return bottom - round(v / ymax * (bottom - top))
+
+    for level in range(0, ymax + 1, ystep):          # horizontal grid
+        y = y_for(level)
+        for x in range(0, w, 1 if level == 0 else 4):
+            put(x, y, GRID)
+    n = len(values)
+    for i in range(n):                                # a dotted tick every 3 hours
+        if (start_unix + i * bucket) % 10800 == 0:
+            x = i * w // n
+            for y in range(top, bottom, 4):
+                put(x, y, GRID)
+
+    prev_y = None
+    for x in range(w):
+        v = values[min(n - 1, x * n // w)]
+        if v < 0:
+            prev_y = None
+            continue
+        y = y_for(v)
+        for yy in range(y + 1, bottom + 1):
+            put(x, yy, AREA)
+        lo, hi = (y, y) if prev_y is None else (min(y, prev_y), max(y, prev_y))
+        for yy in range(lo - 1, hi + 1):
+            put(x, yy, LINE)
+        prev_y = y
+    return png_bytes(w, h, pixels)
+
+
+def graph_caption(values, start_unix, bucket):
+    """Peak time as a Discord timestamp, so each viewer sees their own time zone."""
+    peak = max(values)
+    peak_i = len(values) - 1 - values[::-1].index(peak)   # most recent peak
+    low = min(v for v in values if v >= 0)
+    peak_t = start_unix + peak_i * bucket
+    top = nice_max(max(1, peak))[0]
+    return f"Last 24 h: peak **{peak}** at <t:{peak_t}:t> · low {low} · graph scale 0–{top}"
+
+
+def current_vehicle_text(cfg, p):
+    """The vehicle reported by the client mod, else the spawned vehicles."""
+    active = p.get("active_vehicle")
+    if isinstance(active, dict) and active.get("model"):
+        model = str(active["model"])
+        name = cfg["vehicle_names"].get(model, model)
+        config = active.get("config")
+        if config and config not in ("base", model):
+            name += f" ({config})"
+        if active.get("own") is False:
+            return f"\U0001F440 watching {escape_md(active.get('owner_name') or 'another player')} ({escape_md(name)})"
+        return f"\U0001F697 {escape_md(name)}"
+    return f"\U0001F697 {vehicle_text(cfg, p.get('vehicles'))}"
+
+
 def build_embed(cfg, server, fetched, now):
     live = fetched["live"] if isinstance(fetched["live"], dict) else None
     title_name = server.get("name") or (live and clean_name(live.get("server", {}).get("name"))) or str(server.get("id"))
@@ -375,6 +526,9 @@ def build_embed(cfg, server, fetched, now):
         uptime = fetched.get("uptime_ms")
         if uptime:
             lines.append(f"Uptime: {duration(int(uptime) / 1000)}")
+        series = graph_series(live) if cfg["show_graph"] else None
+        if series:
+            lines.append(graph_caption(*series))
 
         if players:
             lines.append("")
@@ -386,14 +540,17 @@ def build_embed(cfg, server, fetched, now):
                     name += " *(guest)*"
                 if cfg["show_beammp_ids"] and p.get("beammp_id"):
                     name += f" `#{p['beammp_id']}`"
+                afk = p.get("afk") is True
                 session = int(p.get("session_seconds") or 0) + drift
                 time_text = f"⏱ {duration(session)}"
                 if p.get("session_resumed"):
                     time_text += "+"
                 total = p.get("total_playtime_seconds")
                 if total is not None:
-                    time_text += f" · {duration(int(total) + drift)} total"
-                lines.append(f"**{name}** — \U0001F697 {vehicle_text(cfg, p.get('vehicles'))}")
+                    time_text += f" · {duration(int(total) + (0 if afk else drift))} played"
+                if afk:
+                    time_text += f" · \U0001F4A4 AFK {duration(p.get('idle_seconds'))}"
+                lines.append(f"**{name}** — {current_vehicle_text(cfg, p)}")
                 lines.append(f" {time_text}")
             if len(players) > len(shown):
                 lines.append(f"…and {len(players) - len(shown)} more")
@@ -412,7 +569,9 @@ def build_embed(cfg, server, fetched, now):
             month_text += f"\n{float(retention['rate']):.1f}% kept from last month"
         fields = [
             {"name": "Today", "value": f"{num(today.get('unique_users'))} players · {num(today.get('joins'))} joins · "
-                                       f"{num(today.get('new_users'))} new", "inline": True},
+                                       f"{num(today.get('new_users'))} new"
+                                       + (f"\npeak {num(today.get('peak_online'))} online" if "peak_online" in today else ""),
+             "inline": True},
             {"name": "This month", "value": month_text, "inline": True},
             {"name": "All-time", "value": f"{num(all_time.get('unique_users'))} players · "
                                           f"{num(all_time.get('joins'))} joins", "inline": True},
@@ -453,19 +612,45 @@ def message_key(webhook_url, server):
     return f"{digest}:{server.get('id') or server.get('live_json_file')}"
 
 
-def discord_send(webhook_url, payload, message_id):
-    """Edits message_id if given, otherwise posts a new message. Returns the message id."""
+def multipart(payload, filename, data):
+    """multipart/form-data body with payload_json and one PNG as files[0]."""
+    boundary = "pc" + uuid.uuid4().hex
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+        f"Content-Type: application/json\r\n\r\n".encode() + json.dumps(payload).encode("utf-8") + b"\r\n",
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"{filename}\"\r\n"
+        f"Content-Type: image/png\r\n\r\n".encode() + data + b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def discord_send(webhook_url, payload, message_id, image=None):
+    """Edits message_id if given, otherwise posts a new message. Returns the message id.
+    image: PNG bytes attached as GRAPH_FILE (replaces the previous attachment)."""
     base, params = webhook_urls(webhook_url)
+    payload = dict(payload)
+    if image:
+        payload["attachments"] = [{"id": 0, "filename": GRAPH_FILE}]
+        raw, content_type = multipart(payload, GRAPH_FILE, image)
+    else:
+        payload["attachments"] = []  # drop an old graph when there is none now
     for attempt in range(3):
         try:
             if message_id:
                 url = f"{base}/messages/{message_id}"
                 if params:
                     url += "?" + urllib.parse.urlencode(params)
-                http("PATCH", url, body=payload)
+                if image:
+                    http("PATCH", url, raw=raw, content_type=content_type)
+                else:
+                    http("PATCH", url, body=payload)
                 return message_id
             url = base + "?" + urllib.parse.urlencode(dict(params, wait="true"))
-            _, text = http("POST", url, body=payload)
+            if image:
+                _, text = http("POST", url, raw=raw, content_type=content_type)
+            else:
+                _, text = http("POST", url, body=payload)
             return json.loads(text)["id"]
         except HttpError as exc:
             if exc.status == 429 and attempt < 2:
@@ -481,16 +666,65 @@ def discord_send(webhook_url, payload, message_id):
 
 
 # --------------------------------------------------------------------------
+# Stats website (web/ in the repository, e.g. stats.baja75series.org)
+# --------------------------------------------------------------------------
+
+def site_key(server):
+    """Stable short id for the website: site_key, else derived from id or name."""
+    if server.get("site_key"):
+        return str(server["site_key"])
+    raw = str(server.get("id") or server.get("name") or server.get("live_json_file") or "server").lower()
+    key = re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-_")[:40]
+    return key or "server"
+
+
+def website_push(cfg, server, fetched, order):
+    """POST one server's state to ingest.php, signed with HMAC-SHA256 over
+    "<timestamp>.<body>". Player data goes as-is (BeamMP IDs let the site merge
+    the same player across servers); the site never publishes the IDs."""
+    payload = {
+        "server": {"key": site_key(server), "name": server.get("name") or "", "connect": server.get("connect") or "",
+                   "order": order},
+        "panel_state": fetched.get("panel_state"),
+        "error": fetched.get("error"),
+        "uptime_ms": fetched.get("uptime_ms"),
+        "live": fetched.get("live") if isinstance(fetched.get("live"), dict) else None,
+    }
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    timestamp = str(int(time.time()))
+    signature = hmac.new(str(cfg["website_secret"]).encode("utf-8"), timestamp.encode() + b"." + body,
+                         hashlib.sha256).hexdigest()
+    headers = {"X-PlayerCounter-Timestamp": timestamp, "X-PlayerCounter-Signature": "sha256=" + signature}
+    try:
+        http("POST", cfg["website_url"], headers=headers, raw=body, content_type="application/json")
+    except HttpError as exc:
+        try:
+            reason = json.loads(exc.body).get("error") or exc.body[:200]
+        except (ValueError, AttributeError):
+            reason = exc.body[:200]
+        raise RuntimeError(f"website rejected the upload ({exc.status}): {reason}")
+
+
+# --------------------------------------------------------------------------
 # Main loop
 # --------------------------------------------------------------------------
 
 def refresh(cfg, state, state_path, dry_run):
     now = int(time.time())
     messages = state.setdefault("messages", {})
-    for server in cfg["servers"]:
+    for order, server in enumerate(cfg["servers"]):
         label = clean_name(server.get("name") or server.get("id") or server.get("live_json_file"))
         try:
             fetched = fetch_server(cfg, server)
+            if cfg["website_url"] and not dry_run:
+                try:
+                    website_push(cfg, server, fetched, order)
+                except Exception as exc:  # the website being down must not stop Discord updates
+                    log(f"{label}: website update failed: {exc}")
+            webhook_url = server.get("webhook_url") or cfg["webhook_url"]
+            if not webhook_url and not dry_run:
+                log(f"{label}: website updated (no Discord webhook set)")
+                continue
             embed = build_embed(cfg, server, fetched, now)
             payload = {
                 "embeds": [embed],
@@ -501,13 +735,26 @@ def refresh(cfg, state, state_path, dry_run):
             if cfg["webhook_avatar_url"]:
                 payload["avatar_url"] = cfg["webhook_avatar_url"]
 
+            image = None
+            live = fetched["live"] if isinstance(fetched["live"], dict) else None
+            if (cfg["show_graph"] and live and fetched["panel_state"] in ("running", "starting")
+                    and live.get("state") != "stopped"):
+                series = graph_series(live)
+                if series:
+                    image = render_graph(*series)
+                    embed["image"] = {"url": f"attachment://{GRAPH_FILE}"}
+
             if dry_run:
                 print(json.dumps(payload, indent=2, ensure_ascii=False))
+                if image:
+                    out = os.path.join(os.getcwd(), f"preview_{label or 'server'}.png".replace(" ", "_").replace("/", "_"))
+                    with open(out, "wb") as fh:
+                        fh.write(image)
+                    print(f"(graph written to {out})")
                 continue
 
-            webhook_url = server.get("webhook_url") or cfg["webhook_url"]
             key = message_key(webhook_url, server)
-            new_id = discord_send(webhook_url, payload, messages.get(key))
+            new_id = discord_send(webhook_url, payload, messages.get(key), image)
             if new_id != messages.get(key):
                 messages[key] = new_id
                 save_state(state_path, state)

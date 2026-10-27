@@ -24,7 +24,18 @@ local function boot()
 end
 function Util_decode(s) return S.plugins.PlayerCounter.env.Util.JsonDecode(s) end
 local function console(cmd) return S:trigger("onConsoleInput", cmd)[1] end
-local function tick(seconds) T = T + seconds; S:advance(seconds * 1000) end
+-- Advances the clock one 30 s timer tick at a time, like a real server.
+-- Every spawned vehicle is nudged 10 m per tick so players count as driving
+-- (AFK behaviour has its own tests in plugin_test_21.lua).
+local function tick(seconds)
+    for _ = 1, math.max(1, seconds // 30) do
+        T = T + 30
+        for _, p in pairs(S.players) do
+            for _, v in pairs(p.vehicles) do v.pos[1] = v.pos[1] + 10 end
+        end
+        S:advance(30000)
+    end
+end
 local function wipe() os.execute("rm -rf " .. D) end
 local function errors() for _, e in ipairs(S.errors) do print("  plugin error: " .. e); fail = fail + 1 end end
 
@@ -67,7 +78,7 @@ expect(alice and #alice.vehicles == 2 and alice.vehicles[1].model == "pickup" an
 expect(live.server.map == "gridmap_v2" and live.server.max_players == 8, "server info in live.json")
 S:chat(a, "/playtime")
 expect(S:lastChatTo(a):find("Session: 1h 00m | Total playtime: 1h 00m | Joins: 1", 1, true), "/playtime reply: " .. tostring(S:lastChatTo(a)))
-T = T + 1800; S:leave(a)
+tick(1800); S:leave(a)
 st = json(D .. "/stats.json")
 expect(st.players["beammp:101"].playtime_seconds == 5400, "alice playtime 5400 after leaving, got " ..
     tostring(st.players["beammp:101"].playtime_seconds))
@@ -78,7 +89,7 @@ expect(top:find("Alice - 1h 30m", 1, true), "pc.top: " .. top)
 print("== chat commands")
 local n0 = #S.chatLog
 expect(S:chat(b, "/playerstats") == false, "/playerstats is not broadcast")
-expect(#S.chatLog - n0 == 5, "/playerstats sends 5 short lines")
+expect(#S.chatLog - n0 == 6, "/playerstats sends 6 short lines")
 expect(S:chat(b, "  /Retention ") == false, "/Retention handled case/space-insensitively")
 expect(S:chat(b, "hello") == true, "normal chat untouched")
 

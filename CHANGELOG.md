@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.1.0 (2026-10-27)
+
+### Added
+- **Players online:** peak (with time) and average players online per day, month and year; peaks shorter than one sample are caught at join. Archived in `history` and shown in `pc.month`.
+- **Heatmap:** average players online for each weekday hour of the current month (configured calendar); console `pc.heatmap` prints the busiest hours and a 7 × 24 grid. The previous month's heatmap is kept until the next rollover.
+- **24-hour graph data:** most players online per 5-minute bucket for the last 24 h (`online_24h` in `live.json`, `-1` = server not running), kept across restarts.
+- **Joins in the last 24 hours** in `/playerstats`, `pc.peak` and `live.json`.
+- **AFK detection:** playtime pauses when none of a player's vehicles moved `afk_move_meters` (5) for `afk_after_seconds` (300); AFK time is stored as `afk_seconds`. Players with no vehicle are not judged. Settings `afk_detection`, `afk_after_seconds`, `afk_move_meters`.
+- **Optional client mod** (`client/`, `playercounter.zip` in `Resources/Client/`): reports the vehicle a player is driving or watching. The server accepts only vehicles that exist. `live.json` gains `active_vehicle` and an `active` flag on the vehicle list.
+- **Discord status:** a 24-hour player graph (PNG drawn by the script, attached to the message) with the peak time as a Discord timestamp; player lines show the vehicle being driven, "watching <player>", and an AFK marker; Today field shows the peak. `show_graph` setting.
+- Console `pc.peak`; `pc.online` shows AFK and the vehicle being driven or watched.
+- **Stats website** (`web/`): PHP site for shared hosting (Namecheap-ready, e.g. `stats.baja75series.org`) with race-plate server overview, live players, 24 h graph, heatmap, numbers, per-server and series-wide playtime leaderboards (the same BeamMP account merged across servers). Signed uploads (HMAC-SHA256, 5-minute window, replay protection); BeamMP IDs never published; `.htaccess` blocks settings and data. Setup guide in `web/README.md`.
+- **The plugin uploads to the website itself** when `data/website.json` exists (`url`, `secret`; optional `server_name`, `server_key`, `connect`, `order`, `interval_seconds`): every minute, on joins/leaves (at most every 5 s) and on shutdown (marks the server offline). Signed with HMAC-SHA256 implemented in Lua, sent by `curl` in the background; results are logged (`Website upload OK.` / `website upload failed (HTTP ...)`).
+- **Discord script** can upload every server to the website instead (`website_url`, `website_secret` / `PLAYERCOUNTER_WEBSITE_SECRET`, per-server `site_key`); works with or without a Discord webhook.
+- **Leaderboards** in `live.json` (`leaderboard_size`, default 25): all-time and this-month playtime; players now also track `month_playtime_seconds`. `pc.top [N] [month]`.
+- `live.json` carries `calendar_utc_offset_hours` (current, DST included) and `calendar_name`.
+- **Daylight saving** for the stats calendar: `dst` = `"us"` / `"eu"` / `"none"` on top of the standard `utc_offset_hours`, plus `time_zone_name`. Checked against the IANA database on 192 cases around every switch 2025–2030 (`tests/plugin_test_tz.lua`).
+- Website times follow each visitor's own time zone: graph, peak, "updated", leaderboard "last seen" dates, and the heatmap (rotated in the browser from the server's calendar). Today / month / year totals stay on the server's calendar and the page says so. Optional `display_time_zone` / `display_time_zone_name` in `config.php` force one zone (e.g. `America/Denver`) for everyone instead.
+- Tests: `tests/plugin_test_21.lua` (49 checks), `tests/client_test.lua` (7 checks, LuaJIT), `tests/run_web_test.sh` (20 checks: content, privacy, merging, forged/old/replayed uploads) plus `tests/web_push_test.lua` (9 checks of the plugin's own upload, incl. wrong secret and shell-injection attempts).
+
+### Changed
+- `live.json` schema 1 → 2 (fields added only; readers of schema 1 keep working).
+- Playtime excludes AFK time from 2.1.0 on.
+- A single playtime credit is capped at three timer intervals, so a frozen server or a clock jump can no longer add hours of playtime.
+- `/playerstats` starts with an "Online now / Peak today / Peak this month / Joins last 24h" line (6 lines).
+
+### Compatibility
+- `stats.json` stays schema 2; new fields are added on first start. `joins.csv` unchanged.
+
 ## 2.0.1 (2026-10-07)
 
 ### Fixed

@@ -4,4 +4,14 @@ discord/discord_status_state.json
 discord/*.tmp
 
 # Server data if this repo is cloned into a server
-data/
+/data/
+client/playercounter.zip
+
+# Stats website: real settings and uploaded data never go in git
+web/public/config.php
+web/public/data/*.json
+web/public/data/*.lock
+web/public/data/*.tmp
+
+# Owner deployment packages (contain the secret)
+deploy-out/
