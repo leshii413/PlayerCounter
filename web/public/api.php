@@ -45,7 +45,9 @@ function board_entry($e)
         'name' => pc_cut(clean_name($e['name'] ?? ''), 40),
         'playtime_seconds' => (int) num($e['playtime_seconds'] ?? 0),
         'joins' => (int) num($e['joins'] ?? 0),
-        'last_seen' => substr((string) ($e['last_seen'] ?? ''), 0, 10),
+        // Full UTC timestamp; the page shows it as the visitor's local date.
+        'last_seen' => preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', (string) ($e['last_seen'] ?? ''))
+            ? (string) $e['last_seen'] : '',
     ];
 }
 

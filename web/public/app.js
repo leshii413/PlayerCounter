@@ -50,6 +50,25 @@
       return { h: date.getHours(), m: date.getMinutes() };
     }
   }
+  // The viewer's offset from UTC in hours right now (or the display zone's).
+  function viewerOffsetHours() {
+    var now = new Date();
+    if (data && data.display_time_zone) {
+      try {
+        var parts = new Intl.DateTimeFormat("en-GB", { timeZone: data.display_time_zone, year: "numeric", month: "2-digit",
+          day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+        var g = function (t) { return Number((parts.filter(function (p) { return p.type === t; })[0] || {}).value); };
+        return Math.round((Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute")) - now.getTime()) / 60000) / 60;
+      } catch (e) { /* fall through to the browser's zone */ }
+    }
+    return -now.getTimezoneOffset() / 60;
+  }
+  function fmtDate(iso) {
+    var d = new Date(iso);
+    if (!iso || isNaN(d.getTime())) return "?";
+    try { return d.toLocaleDateString([], tzOpts({ year: "numeric", month: "short", day: "numeric" })); }
+    catch (e) { return d.toLocaleDateString(); }
+  }
   function zoneName() {
     if (data && data.display_time_zone_name) return data.display_time_zone_name;
     if (data && data.display_time_zone) return data.display_time_zone.replace(/_/g, " ");
@@ -150,7 +169,7 @@
   function boardList(rows, withServers) {
     if (!rows || !rows.length) return h("p.empty-note", { text: "No playtime recorded for this period yet." });
     return h("ol.board", null, rows.map(function (r, i) {
-      var sub = n(r.joins) + " joins, last seen " + (r.last_seen || "?");
+      var sub = n(r.joins) + " joins, last seen " + fmtDate(r.last_seen);
       if (withServers && r.servers > 1) sub += ", on " + r.servers + " servers";
       return h("li", null,
         h("span.rank", { text: String(i + 1) }),
@@ -250,7 +269,16 @@
 
   // Heatmap ---------------------------------------------------------------------
 
+  // values: 168 weekday-hour averages in the server's calendar (offset =
+  // server's current UTC offset). Shifted here into the viewer's time zone;
+  // half-hour zones round to the nearest hour.
   function heatmap(values, offset, calendarName) {
+    var shift = Math.round(viewerOffsetHours() - offset);
+    if (values && values.length === 168 && shift !== 0) {
+      var moved = new Array(168);
+      for (var i = 0; i < 168; i++) moved[(((i + shift) % 168) + 168) % 168] = values[i];
+      values = moved;
+    }
     var wrap = h("div");
     var real = (values || []).filter(function (v) { return v >= 0; });
     if (!real.length) {
@@ -273,7 +301,7 @@
       }
     }
     wrap.appendChild(grid);
-    var tz = (calendarName ? calendarName + ", " : "") + "UTC" + (offset >= 0 ? "+" : "") + offset;
+    var tz = zoneName();
     wrap.appendChild(h("div.heat-legend", null, "Quiet",
       [0, 1, 2, 3, 4].map(function (l) { return h("span.sw", { "data-l": String(l) }); }),
       busiest > 0
@@ -338,6 +366,8 @@
     var note = ret && ret.rate !== null && ret.rate !== undefined
       ? h("p.chart-note", { text: Number(ret.rate).toFixed(1) + "% of last month's " + n(ret.previous_users) + " players came back this month. " + n(st.joins_24h) + " joins in the last 24 hours." })
       : h("p.chart-note", { text: n(st.joins_24h) + " joins in the last 24 hours." });
+    var cal = sv.calendar_name || ("UTC" + (sv.calendar_utc_offset_hours >= 0 ? "+" : "") + sv.calendar_utc_offset_hours);
+    note.textContent += " Today, month and year are counted on the server's calendar (" + cal + ").";
     return [table, note];
   }
 
@@ -395,7 +425,7 @@
     document.getElementById("updated").textContent = "Updated " + fmtTime(new Date(data.generated_unix * 1000), { hour: "numeric", minute: "2-digit" }) +
       (local ? "" : " " + zoneName()) + ", refreshes every minute";
     document.getElementById("time-note").textContent = "Playtime counts time on a server minus time spent AFK. " +
-      (local ? "Times are shown in your own time zone; the activity grid uses each server's calendar, named under the grid."
+      (local ? "All times are shown in your own time zone."
              : "All times are " + zoneName() + ".");
     renderPlates(data.servers);
     renderSeries(data.series);

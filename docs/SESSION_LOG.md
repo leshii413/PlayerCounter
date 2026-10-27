@@ -206,3 +206,14 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 
 **Done**
 - `app.js`: the scale fallback is never shown; the legend says "No players online in the hours recorded so far" when all recorded hours are 0, otherwise "The busiest hour so far averages N players", and explains that striped hours aren't recorded yet. Checked in Chromium with an all-zero server and a busy one. Rebuilt and re-sent the site zip.
+
+### Prompt 20 (2026-10-27 14:11, sent while prompt 19 was being fixed)
+
+> time zones relative to user accessing site. any time mentions are based on visiting user data of the website
+
+**Decided**: D33 (every time shown on the site follows the visitor's time zone, including the heatmap and "last seen" dates; only the Today/month/year totals stay on the server calendar, labelled as such).
+
+**Done**
+- `app.js`: heatmap rotated from the server calendar into the visitor's zone (`viewerOffsetHours()`, half-hour zones round to the nearest hour), legend says "your local time"; leaderboard "last seen" shown as the visitor's local date; numbers note says Today/month/year are counted on the server's calendar; footer "All times are shown in your own time zone."
+- `api.php`: `last_seen` now the full UTC timestamp (validated format) instead of a UTC date.
+- Verified in Chromium: 168/168 cells correct for Singapore (+0 h), New York (−12 h) and Kolkata (−2 h) against a sample in a UTC+8 server calendar. `tests/run_web_test.sh` updated (last_seen) and passing. Rebuilt and re-sent the site zip.

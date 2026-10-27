@@ -57,7 +57,7 @@ top = s_all[0]
 check(top["name"] == "Leshii413" and top["playtime_seconds"] == 2 * 126380 and top["servers"] == 2,
       "series board merges the same BeamMP ID across servers")
 check(api["series"]["month"][0]["name"] == "Hilly_*Racing*", "series month board ordered by playtime")
-check(by["aaaa"]["leaderboard"]["all_time"][0]["last_seen"] == "2026-10-12", "server board dates trimmed")
+check(by["aaaa"]["leaderboard"]["all_time"][0]["last_seen"] == "2026-10-12T04:31:12Z", "last seen kept as a UTC timestamp for local display")
 
 def post(body, ts=None, sig=None, key=None):
     ts = str(ts if ts is not None else int(time.time()))
