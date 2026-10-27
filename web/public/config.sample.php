@@ -30,4 +30,11 @@ return [
 
     // Players per leaderboard on the page.
     'leaderboard_size' => 15,
+
+    // Time zone for every time shown on the page (graph, peak, "updated"),
+    // as an IANA name, e.g. 'America/Denver' (St George, Utah: Mountain Time,
+    // daylight saving handled automatically). Empty = each visitor's own time.
+    'display_time_zone' => '',
+    // How that time zone is described on the page, e.g. 'St George, Utah time'.
+    'display_time_zone_name' => '',
 ];

@@ -35,10 +35,17 @@ local WEBSITE_REPLY = DATA_DIR .. "/website_reply.txt"
 local WEBSITE_CODE = DATA_DIR .. "/website_status.txt"
 
 local DEFAULT_CONFIG = {
-    -- Calendar used for day / month / year rollover. 0 = UTC, 8 = UTC+8 (PH/SG),
-    -- -5 = US Eastern (standard time). Fractions work (5.5 = India).
-    -- Avoid changing this after collecting data: it shifts period boundaries.
+    -- Calendar used for day / month / year rollover and the heatmap.
+    -- utc_offset_hours is the STANDARD (winter) offset: 0 = UTC, 8 = UTC+8
+    -- (PH/SG), -7 = US Mountain (St George, Utah), -5 = US Eastern.
+    -- Fractions work (5.5 = India). dst adds one hour in summer:
+    -- "us" (second Sunday of March to first Sunday of November),
+    -- "eu" (last Sunday of March to last Sunday of October) or "none".
+    -- Avoid changing these after collecting data: they shift period boundaries.
     utc_offset_hours = 0,
+    dst = "none",
+    -- Optional name for the calendar, shown on the website (e.g. "St George, Utah time").
+    time_zone_name = "",
 
     -- Guests have no permanent BeamMP ID. false = guests count as join
     -- sessions but not as unique players (recommended).
@@ -180,8 +187,68 @@ local function now()
     return os.time()
 end
 
+-- Days since 1970-01-01 for a calendar date (proleptic Gregorian).
+local function daysFromCivil(y, m, d)
+    if m <= 2 then
+        y = y - 1
+    end
+    local era = (y >= 0 and y or y - 399) // 400
+    local yoe = y - era * 400
+    local mp = (m + 9) % 12
+    local doy = (153 * mp + 2) // 5 + d - 1
+    local doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+end
+
+-- Day of month of the n-th (or last, n = -1) Sunday of a month.
+local function nthSunday(y, m, n)
+    if n > 0 then
+        local wday = (daysFromCivil(y, m, 1) + 4) % 7 -- 0 = Sunday
+        return 1 + (7 - wday) % 7 + (n - 1) * 7
+    end
+    local lastDay = daysFromCivil(m == 12 and y + 1 or y, m == 12 and 1 or m + 1, 1) - daysFromCivil(y, m, 1)
+    local wday = (daysFromCivil(y, m, lastDay) + 4) % 7
+    return lastDay - wday
+end
+
+-- True while daylight saving time is in effect at unix time t.
+local function dstActive(t)
+    local rule = config.dst
+    if rule ~= "us" and rule ~= "eu" then
+        return false
+    end
+    local year = tonumber(os.date("!%Y", t))
+    local start, finish
+    if rule == "us" then
+        -- 02:00 local standard time / 02:00 local daylight time
+        local std = (config.utc_offset_hours or 0) * 3600
+        start = daysFromCivil(year, 3, nthSunday(year, 3, 2)) * 86400 + 7200 - std
+        finish = daysFromCivil(year, 11, nthSunday(year, 11, 1)) * 86400 + 7200 - (std + 3600)
+    else
+        -- 01:00 UTC on both changes
+        start = daysFromCivil(year, 3, nthSunday(year, 3, -1)) * 86400 + 3600
+        finish = daysFromCivil(year, 10, nthSunday(year, 10, -1)) * 86400 + 3600
+    end
+    return t >= start and t < finish
+end
+
+-- The calendar's offset from UTC right now, in hours (DST included).
+local function currentOffsetHours(t)
+    return (config.utc_offset_hours or 0) + (dstActive(t or now()) and 1 or 0)
+end
+
 local function shiftedTime()
-    return math.floor(now() + (config.utc_offset_hours or 0) * 3600)
+    local t = now()
+    return math.floor(t + currentOffsetHours(t) * 3600)
+end
+
+local function calendarLabel()
+    local offset = currentOffsetHours()
+    local text = "UTC" .. (offset >= 0 and "+" or "") .. tostring(offset)
+    if config.time_zone_name and config.time_zone_name ~= "" then
+        text = config.time_zone_name .. ", " .. text
+    end
+    return text
 end
 
 local function periodKeys()
@@ -413,6 +480,12 @@ local function applyConfig(loaded)
         log("WARNING: utc_offset_hours " .. config.utc_offset_hours .. " is out of range; using 0.")
         config.utc_offset_hours = 0
     end
+    config.dst = tostring(config.dst or "none"):lower()
+    if config.dst ~= "us" and config.dst ~= "eu" and config.dst ~= "none" then
+        log("WARNING: dst must be us, eu or none; using none.")
+        config.dst = "none"
+    end
+    config.time_zone_name = tostring(config.time_zone_name or ""):sub(1, 60)
     config.count_guests_as_unique = config.count_guests_as_unique == true
     config.player_commands = tostring(config.player_commands):lower()
     if config.player_commands ~= "everyone" and config.player_commands ~= "admins"
@@ -449,7 +522,7 @@ local function loadConfig()
     end
 
     -- Written by hand so the order is stable and the admin list is a JSON array.
-    local order = { "utc_offset_hours", "count_guests_as_unique", "player_commands",
+    local order = { "utc_offset_hours", "dst", "time_zone_name", "count_guests_as_unique", "player_commands",
         "admin_beammp_ids", "live_snapshot", "live_interval_seconds",
         "afk_detection", "afk_after_seconds", "afk_move_meters", "leaderboard_size" }
     local lines = {}
@@ -1253,7 +1326,8 @@ local function buildSnapshot(serverState)
         updated_at = utcTimestamp(t),
         updated_unix = t,
         interval_seconds = config.live_interval_seconds,
-        calendar_utc_offset_hours = config.utc_offset_hours, -- day/month/heatmap calendar
+        calendar_utc_offset_hours = currentOffsetHours(t), -- day/month/heatmap calendar, DST included
+        calendar_name = config.time_zone_name ~= "" and config.time_zone_name or nil,
         server = {
             name = tostring(setting(MP.Settings.Name) or ""),
             map = map:match("/levels/([^/]+)/") or map,
@@ -1499,10 +1573,7 @@ local function slotName(slot)
     return string.format("%s %02d:00", WEEKDAYS[day], hour)
 end
 
-local function calendarLabel()
-    local offset = config.utc_offset_hours
-    return "UTC" .. (offset >= 0 and "+" or "") .. tostring(offset)
-end
+
 
 -- Peak and average players online for today, this month, this year.
 local function peakReport()
@@ -1959,8 +2030,8 @@ function PlayerCounter_OnInit()
     loadWebsite()
     writeLive("running", true)
 
-    log("PlayerCounter " .. PLUGIN_VERSION .. " loaded (calendar UTC" ..
-        (config.utc_offset_hours >= 0 and "+" or "") .. tostring(config.utc_offset_hours) ..
+    log("PlayerCounter " .. PLUGIN_VERSION .. " loaded (calendar " .. calendarLabel() ..
+        (config.dst ~= "none" and (", " .. config.dst:upper() .. " daylight saving") or "") ..
         ", player commands: " .. config.player_commands .. "). Type pc.help in the console.")
     log(statsMessage())
     log(retentionMessage())

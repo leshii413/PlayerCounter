@@ -28,6 +28,34 @@
   var lastCounts = {};     // server key -> player count, to animate changes
   var data = null;
 
+  // Times on the page: the site's display time zone (config.php), else the
+  // visitor's own. Falls back to local time if the browser lacks the zone.
+  function tzOpts(extra) {
+    var o = {};
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    if (data && data.display_time_zone) o.timeZone = data.display_time_zone;
+    return o;
+  }
+  function fmtTime(date, extra) {
+    try { return date.toLocaleTimeString([], tzOpts(extra)); }
+    catch (e) { return date.toLocaleTimeString([], extra); }
+  }
+  // Hour (0-23) and minute of a date in the display time zone.
+  function hourMinute(date) {
+    try {
+      var parts = new Intl.DateTimeFormat("en-GB", tzOpts({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).formatToParts(date);
+      var get = function (t) { return Number((parts.filter(function (p) { return p.type === t; })[0] || {}).value); };
+      return { h: get("hour"), m: get("minute") };
+    } catch (e) {
+      return { h: date.getHours(), m: date.getMinutes() };
+    }
+  }
+  function zoneName() {
+    if (data && data.display_time_zone_name) return data.display_time_zone_name;
+    if (data && data.display_time_zone) return data.display_time_zone.replace(/_/g, " ");
+    return "your local time";
+  }
+
   // DOM helper: h("tag.class", {attr}, children...)
   function h(spec, attrs) {
     var parts = spec.split(".");
@@ -88,7 +116,7 @@
     var box = document.getElementById("plates");
     box.textContent = "";
     if (!servers.length) {
-      box.appendChild(h("p.empty-note", { text: "No server has sent stats yet. Check that the Discord status script has website_url and website_secret set." }));
+      box.appendChild(h("p.empty-note", { text: "Waiting for the first BeamMP server to report. Servers appear here about a minute after they start with PlayerCounter installed." }));
       return;
     }
     servers.forEach(function (sv) {
@@ -174,9 +202,10 @@
     for (var i = 0; i < count; i++) {
       var t = start + i * bucket;
       var d = new Date(t * 1000);
-      if (d.getMinutes() === 0 && d.getHours() % 3 === 0) {
+      var hm = hourMinute(d);
+      if (hm.m === 0 && hm.h % 3 === 0) {
         axis.appendChild(s("text", { x: x(i), y: H - 8, "text-anchor": "middle" },
-          d.toLocaleTimeString([], { hour: "numeric" })));
+          fmtTime(d, { hour: "numeric" })));
       }
     }
     svg.appendChild(grid);
@@ -211,7 +240,7 @@
     var px = x(pi + 0.5), py = y(peak);
     var g = s("g", { "class": "peak" });
     g.appendChild(s("circle", { cx: px, cy: py, r: 5 }));
-    var when = new Date((start + pi * bucket) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    var when = fmtTime(new Date((start + pi * bucket) * 1000), { hour: "numeric", minute: "2-digit" });
     g.appendChild(s("text", { x: px, y: py - 10, "text-anchor": px > W - 90 ? "end" : "middle" }, "Peak " + peak + " at " + when));
     svg.appendChild(g);
     wrap.appendChild(svg);
@@ -221,7 +250,7 @@
 
   // Heatmap ---------------------------------------------------------------------
 
-  function heatmap(values, offset) {
+  function heatmap(values, offset, calendarName) {
     var wrap = h("div");
     var real = (values || []).filter(function (v) { return v >= 0; });
     if (!real.length) {
@@ -243,7 +272,7 @@
       }
     }
     wrap.appendChild(grid);
-    var tz = "UTC" + (offset >= 0 ? "+" : "") + offset;
+    var tz = (calendarName ? calendarName + ", " : "") + "UTC" + (offset >= 0 ? "+" : "") + offset;
     wrap.appendChild(h("div.heat-legend", null, "Quiet",
       [0, 1, 2, 3, 4].map(function (l) { return h("span.sw", { "data-l": String(l) }); }),
       "Busy. The busiest hour averages " + max.toFixed(1) + " players; times in " + tz + "."));
@@ -346,7 +375,7 @@
       h("div", null, h("h3", { text: "Who's on" }), driversTable(sv)),
       h("div", null, h("h3", { text: "Last 24 hours" }), chart(sv.graph)),
       h("div", null, h("h3", { text: "Numbers" }), numbersTable(sv)),
-      h("div", null, h("h3", { text: "When people play" }), heatmap(sv.heatmap, sv.calendar_utc_offset_hours || 0)),
+      h("div", null, h("h3", { text: "When people play" }), heatmap(sv.heatmap, sv.calendar_utc_offset_hours || 0, sv.calendar_name)),
       sv.leaderboard && data.show_player_names ? h("div.span-all", null,
         h("div.board-head", null, h("h3", { text: "Most seat time on this server" }), boardToggle), boardBox) : null);
     section.appendChild(grid);
@@ -359,7 +388,8 @@
   function render() {
     document.title = data.title;
     document.getElementById("site-title").textContent = data.title;
-    document.getElementById("updated").textContent = "Updated " + new Date(data.generated_unix * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ", refreshes every minute";
+    document.getElementById("updated").textContent = "Updated " + fmtTime(new Date(data.generated_unix * 1000), { hour: "numeric", minute: "2-digit" }) + " " + zoneName() + ", refreshes every minute";
+    document.getElementById("time-note").textContent = "Playtime counts time on a server minus time spent AFK. All times are " + zoneName() + ".";
     renderPlates(data.servers);
     renderSeries(data.series);
     var box = document.getElementById("servers");

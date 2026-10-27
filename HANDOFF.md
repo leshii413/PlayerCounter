@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 13:40 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 14:00 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
@@ -49,6 +49,7 @@ tests/run_web_test.sh            website e2e: script -> PHP built-in server -> a
 tests/web_push_test.lua          plugin's own upload via curl to the PHP test site (9 checks incl. wrong secret, shell injection)
 tests/plugin_test.lua            45 offline checks for main.lua (2.0.1 behaviour)
 tests/plugin_test_21.lua         40 offline checks for 2.1 (concurrency, heatmap, graph, AFK, active vehicle)
+tests/plugin_test_tz.lua         192 DST checks vs Python zoneinfo cases in tests/tz_cases.txt (America/Denver, Europe/London 2025-2030)
 tests/run_plugin_tests.sh        runs every tests/plugin_test*.lua: LUA=lua5.3 MOCK_BEAMMP=/path/mock_beammp.lua tests/run_plugin_tests.sh
 tests/client_test.lua            7 checks for the client mod with stubbed game API: luajit tests/client_test.lua client/lua/ge/extensions/playerCounter/client.lua
 tests/fake_panel_discord.py      fake Pterodactyl client API + fake Discord webhook (127.0.0.1:8765)
@@ -139,12 +140,13 @@ Resources/Server/PlayerCounter/data/
 | D28 | Each BeamMP server uploads to the site itself (Lua HMAC + background curl) instead of relying on the Discord script; the server zip is identical for all servers (name/key from the BeamMP server name). Supersedes D22 as the default path; the script upload remains as an alternative (use one per server). | Owner asked for "no editing, ready to upload"; the script needs panel URL/API key/server ids only the owner has. |
 | D29 | `stale_after_seconds` default 300 (plugin uploads every 60 s + on joins/leaves); 900 only when the script uploads. | Faster "No recent data" when a server dies. |
 | D30 | The website footer credits "By Leshii413" linking to https://www.patreon.com/Leshii413; no GitHub link on the page. | Owner's request (2026-10-27). |
+| D31 | Time zone = St George, Utah (US Mountain): plugin `utc_offset_hours` -7 + `dst` "us" (new US/EU DST rules in Lua, `time_zone_name`); website shows all times in `America/Denver` for every visitor (`display_time_zone`). Both preset in the owner's zips (server zip now ships `data/config.json`; re-extracting it overwrites that file). | Owner's request (2026-10-27); a fixed offset would be an hour off half the year. |
 
 ## 6. Open items / next steps
 
 1. **First live test** on one server: install the plugin (2.1.0), check `[PlayerCounter] PlayerCounter 2.1.0 loaded`, join, run `pc.online`, `pc.peak`, confirm `data/live.json` updates; park for 5+ min and confirm AFK.
 2. **Client mod live test**: copy `playercounter.zip` to `Resources/Client/`, rejoin, switch vehicles and spectate another player; `pc.online` should show "driving" / "watching". Uses `MPVehicleGE.getServerVehicleID` and `getPlayerVehicle(0)`; not yet run in BeamNG.
-3. **Website live setup** (owner, following `SETUP-INSTRUCTIONS.md`): create stats.baja75series.org, extract the site zip; on each Pterodactyl BeamMP server unarchive `BeamMP-server-files.zip` and restart; expect `Website upload OK.`; then check `/config.php`, `/data/`, `/lib.php` are blocked. Optional later: `utc_offset_hours` 8 in each server's `data/config.json` (owner's old offset unknown; default UTC). Free SSL is automatic for the first year only, then renewed through Namecheap. If ModSecurity blocks POSTs, Namecheap support must allow `ingest.php`.
+3. **Website live setup** (owner, following `SETUP-INSTRUCTIONS.md`): create stats.baja75series.org, extract the site zip; on each Pterodactyl BeamMP server unarchive `BeamMP-server-files.zip` and restart; expect `Website upload OK.`; then check `/config.php`, `/data/`, `/lib.php` are blocked. Time zone is preset to St George, Utah (D31). Free SSL is automatic for the first year only, then renewed through Namecheap. If ModSecurity blocks POSTs, Namecheap support must allow `ingest.php`.
 4. **Discord script live test**: create `discord_status.json`, run `--once --dry-run` (writes a preview PNG), then `--once`; confirm the graph attachment replaces itself on edits (multipart PATCH with `attachments`, untested on real Discord) and subuser permissions (D13).
 5. Owner to review and merge PR #2, then PR #3 (or retarget #3 to `main`); tag `v2.0.1` / `v2.1.0` and attach `main.lua` + `playercounter.zip`.
 6. `weekly_push.py` is described in the install guide (sections 20–24, 26, 28) but **does not exist** in the repo. Roadmap item 9 proposes a weekly Discord summary instead; not started.

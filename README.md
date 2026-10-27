@@ -82,6 +82,8 @@ A successful start prints:
 ```json
 {
     "utc_offset_hours": 0,
+    "dst": "none",
+    "time_zone_name": "",
     "count_guests_as_unique": false,
     "player_commands": "everyone",
     "admin_beammp_ids": [],
@@ -96,7 +98,9 @@ A successful start prints:
 
 | Setting | Meaning |
 |---|---|
-| `utc_offset_hours` | Calendar used for day/month/year rollover. `0` = UTC, `8` = Philippines/Singapore, `-5` = US Eastern. Pick it before collecting data; the console warns if it changes later. |
+| `utc_offset_hours` | Calendar used for day/month/year rollover and the heatmap, as the **standard (winter)** offset. `0` = UTC, `8` = Philippines/Singapore, `-7` = US Mountain (St George, Utah), `-5` = US Eastern. Pick it before collecting data; the console warns if it changes later. |
+| `dst` | Daylight saving: `"us"` (second Sunday of March to first Sunday of November, e.g. St George: UTC−7 in winter, UTC−6 in summer), `"eu"` (last Sunday of March to last Sunday of October) or `"none"`. |
+| `time_zone_name` | Optional name shown with the heatmap on the website, e.g. `"St George, Utah time"`. |
 | `count_guests_as_unique` | `false` (recommended): guests count as join sessions but not unique players, because guests have no permanent ID. `true` uses the guest name as an approximate identity. |
 | `player_commands` | Who may use the chat commands: `"everyone"`, `"admins"` or `"off"`. |
 | `admin_beammp_ids` | BeamMP IDs allowed when `player_commands` is `"admins"`, e.g. `["583921"]`. |

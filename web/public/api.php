@@ -174,6 +174,7 @@ foreach (pc_server_files() as $file) {
         'player_count' => $running ? count(as_list($live['players'] ?? [])) : 0,
         'players' => $players,
         'calendar_utc_offset_hours' => num($live['calendar_utc_offset_hours'] ?? 0),
+        'calendar_name' => pc_cut(clean_name($live['calendar_name'] ?? ''), 60),
         'stats' => [
             'today' => is_array($stats['today'] ?? null) ? $stats['today'] : null,
             'month' => is_array($stats['month'] ?? null) ? $stats['month'] : null,
@@ -208,6 +209,9 @@ pc_json(200, [
     'title' => (string) $config['site_title'],
     'generated_unix' => $now,
     'show_player_names' => $showNames,
+    'display_time_zone' => preg_match('#^[A-Za-z_]+(/[A-Za-z0-9_+\-]+){0,2}$#', (string) $config['display_time_zone'])
+        ? (string) $config['display_time_zone'] : '',
+    'display_time_zone_name' => pc_cut($config['display_time_zone_name'], 60),
     'servers' => $servers,
     'series' => $showNames ? [
         'month_key' => $seriesMonth,

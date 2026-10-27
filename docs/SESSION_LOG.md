@@ -158,3 +158,25 @@ Times are the owner's local time (Asia/Singapore, UTC+8).
 
 **Done**
 - `web/public/index.html` footer now reads "By Leshii413. Data refreshes every minute." with the Patreon link (the Patreon page couldn't be fetched from the session to confirm the address; standard vanity URL used). Rebuilt `stats.baja75series.org-site.zip` (same config.php/secret) and re-sent it. Footer checked in Chromium.
+
+### Prompt 14 (2026-10-27 13:47)
+
+> i want timezone to be St George's timezone
+
+Asked which St George's (Grenada, Bermuda or Utah); the owner interrupted with:
+
+### Prompt 15 (2026-10-27 13:47)
+
+> utah
+
+### Prompt 16 (2026-10-27 13:48, sent while working)
+
+A screenshot of the live stats.baja75series.org page showing "On the dirt right now" and the empty message "No server has sent stats yet. Check that the Discord status script has website_url and website_secret set." (the site is up; no BeamMP server has uploaded yet).
+
+**Decided**: D31 (St George, Utah = US Mountain Time with US DST in the plugin; website shows America/Denver times for everyone).
+
+**Done**
+- `main.lua`: `dst` ("us"/"eu"/"none") and `time_zone_name`; `utc_offset_hours` is now the standard offset; `currentOffsetHours()` drives period keys, heatmap, labels and `live.json` (`calendar_utc_offset_hours`, `calendar_name`). New `tests/plugin_test_tz.lua`: 192/192 cases from Python zoneinfo around every switch 2025–2030.
+- Website: `display_time_zone`/`display_time_zone_name` (config.php → api.php → page); graph ticks, peak and "Updated" use that zone; footer says which zone; empty message now refers to BeamMP servers, not the Discord script. Verified in Chromium from Singapore and Berlin: identical Utah times, peak matches Denver.
+- Rebuilt the zips with Utah preset: site `config.php` (`America/Denver`, "St George, Utah time"), server zip now also has `data/config.json` (`-7`, `"us"`, "St George, Utah time"). Updated SETUP-INSTRUCTIONS.md.
+- Tests: plugin 45/45, 49/49, 192/192; web 20/20 + 9/9; Discord OK; client 7/7. Docs updated, pushed to PR #3, mirrored.

@@ -25,6 +25,8 @@ function pc_config()
         'stale_after_seconds' => 300,
         'show_player_names' => true,
         'leaderboard_size' => 15,
+        'display_time_zone' => '',
+        'display_time_zone_name' => '',
     ];
     return $config;
 }
