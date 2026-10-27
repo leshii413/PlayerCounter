@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 14:25 (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-27 14:35 (work wrapped up for now) (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
 
 ## 1. What this project is
 
@@ -26,7 +26,7 @@ Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools L
 | Branch `playercounter-2.1` | 2.1.0 work incl. the stats website, stacked on `playercounter-2.0.1`. **PR #3** https://github.com/leshii413/PlayerCounter/pull/3 (base `playercounter-2.0.1`; retarget to `main` after #2 merges, or merge #2 then #3). |
 | Plugin version | 2.1.0 on `playercounter-2.1` (`PLUGIN_VERSION` in `main.lua`); Discord script 2.1.0; `live.json` schema 2. |
 | Tested offline | Yes: 45/45 + 49/49 plugin checks (BeamMP mock, Lua 5.3), 7/7 client-mod checks (LuaJIT, stubbed game API), Discord script end to end vs fake panel + fake Discord incl. multipart graph upload, website end to end 20/20 (PHP 8.3 built-in server; content, privacy, merging, forged/old/replayed uploads), page screenshots desktop/mobile/dark with no console errors or horizontal scroll. |
-| Tested live | **No.** Never run on a real BeamMP server, Pterodactyl panel, BeamNG client, Discord or Namecheap hosting. First live test is the top open item. |
+| Tested live | **Partly.** The website is live on Namecheap and at least one BeamMP server uploads to it with the St George calendar (2026-10-27). Not yet live-tested: the client mod in BeamNG, AFK in real play, and the Discord status script. |
 | Website hosting | stats.baja75series.org is **live** on the owner's Namecheap shared hosting, and at least one BeamMP server is uploading with the St George calendar (owner screenshots, 2026-10-27 14:10). Owner received ready-to-extract zips (2026-10-27): `stats.baja75series.org-site.zip` (site + filled `config.php`) and `BeamMP-server-files.zip` (main.lua, `data/website.json`, client mod) plus `SETUP-INSTRUCTIONS.md`. The shared secret exists **only in those zips** (generated in-session, never committed, not in the Project or memory); a new session cannot recover it and should generate a new one for both sides if needed. |
 
 ## 3. File map

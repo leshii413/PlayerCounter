@@ -241,7 +241,7 @@ Useful if you want your own website or bot to read it:
 
 ## Stats website
 
-`web/` is a small PHP site for ordinary shared hosting, set up for `stats.baja75series.org`. Each BeamMP server uploads its own stats every minute and on joins/leaves when `data/website.json` holds the site address and shared secret (uploads use `curl` in the background and are signed with HMAC-SHA256); the Discord status script can upload instead. The page shows each server as a race plate with its player count, then for every server: who's on (vehicle, session, playtime, AFK), the 24-hour graph, the weekday-hour heatmap, today / month / year / all-time numbers, and seat-time leaderboards. A series leaderboard adds up the same BeamMP account across all servers. BeamMP IDs are never published.
+`web/` is a small PHP site for ordinary shared hosting, set up for `stats.baja75series.org`. Each BeamMP server uploads its own stats every minute and on joins/leaves when `data/website.json` holds the site address and shared secret (uploads use `curl` in the background and are signed with HMAC-SHA256); the Discord status script can upload instead. The page shows each server as a race plate with its player count, then for every server: who's on (vehicle, session, playtime, AFK), the 24-hour graph, the weekday-hour heatmap, today / month / year / all-time numbers, and seat-time leaderboards. A series leaderboard adds up the same BeamMP account across all servers. BeamMP IDs are never published. Every time on the page is shown in the visitor's own time zone (the heatmap is shifted to match); Today / month / year totals follow the servers' calendar.
 
 Step-by-step setup for Namecheap (subdomain, SSL, upload, secret, checks): **[web/README.md](web/README.md)**.
 

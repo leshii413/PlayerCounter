@@ -70,7 +70,7 @@ In cPanel, open **Select PHP Version** (or **MultiPHP Manager**) and pick PHP 8.
    ```
 
    This puts it in `/home/<cpanel user>/playercounter-data`, which the web server never serves.
-4. Optional: `site_title`, `show_player_names` (`false` = totals and graphs only), `leaderboard_size`, `display_time_zone` (IANA name such as `'America/Denver'`; every time on the page is then shown in that zone, daylight saving included) and `display_time_zone_name` (e.g. `'St George, Utah time'`). Empty = each visitor sees their own time.
+4. Optional: `site_title`, `show_player_names` (`false` = totals and graphs only), `leaderboard_size`, `display_time_zone` and `display_time_zone_name`. By default (empty) every time on the page, including the heatmap and "last seen" dates, is shown in each visitor's own time zone. Set an IANA name such as `'America/Denver'` (and a label like `'St George, Utah time'`) to show everyone the same zone instead.
 
 ### 6. Point the BeamMP servers at the site
 

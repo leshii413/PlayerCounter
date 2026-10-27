@@ -217,3 +217,13 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 - `app.js`: heatmap rotated from the server calendar into the visitor's zone (`viewerOffsetHours()`, half-hour zones round to the nearest hour), legend says "your local time"; leaderboard "last seen" shown as the visitor's local date; numbers note says Today/month/year are counted on the server's calendar; footer "All times are shown in your own time zone."
 - `api.php`: `last_seen` now the full UTC timestamp (validated format) instead of a UTC date.
 - Verified in Chromium: 168/168 cells correct for Singapore (+0 h), New York (−12 h) and Kolkata (−2 h) against a sample in a UTC+8 server calendar. `tests/run_web_test.sh` updated (last_seen) and passing. Rebuilt and re-sent the site zip.
+
+### Prompt 21 (2026-10-27 14:22)
+
+> finish work
+
+**Done**
+- Final check: the owner's ready zips match the repo (main.lua, client mod and every site file); all suites pass (plugin 45/45, 49/49, 192/192; client 7/7; Discord e2e OK; website 20/20 + plugin upload 9/9; PHP lint and JS syntax clean).
+- Docs aligned with visitor-local times (README, CHANGELOG, web/README, SETUP-INSTRUCTIONS.md).
+- Rebuilt the public release `PlayerCounter-2.1.0.zip` (plugin, client mod, Discord script, website with config.sample.php; verified it contains no secret). PR #3 description rewritten to cover all of 2.1.0.
+- Not done (needs the owner): merging PR #2 then PR #3 into `main` and tagging v2.0.1 / v2.1.0; live tests of the client mod and the Discord script.

@@ -17,7 +17,7 @@
 - **Leaderboards** in `live.json` (`leaderboard_size`, default 25): all-time and this-month playtime; players now also track `month_playtime_seconds`. `pc.top [N] [month]`.
 - `live.json` carries `calendar_utc_offset_hours` (current, DST included) and `calendar_name`.
 - **Daylight saving** for the stats calendar: `dst` = `"us"` / `"eu"` / `"none"` on top of the standard `utc_offset_hours`, plus `time_zone_name`. Checked against the IANA database on 192 cases around every switch 2025–2030 (`tests/plugin_test_tz.lua`).
-- Website: `display_time_zone` / `display_time_zone_name` in `config.php` show every time on the page in one zone (e.g. `America/Denver`, St George, Utah) for all visitors.
+- Website times follow each visitor's own time zone: graph, peak, "updated", leaderboard "last seen" dates, and the heatmap (rotated in the browser from the server's calendar). Today / month / year totals stay on the server's calendar and the page says so. Optional `display_time_zone` / `display_time_zone_name` in `config.php` force one zone (e.g. `America/Denver`) for everyone instead.
 - Tests: `tests/plugin_test_21.lua` (49 checks), `tests/client_test.lua` (7 checks, LuaJIT), `tests/run_web_test.sh` (20 checks: content, privacy, merging, forged/old/replayed uploads) plus `tests/web_push_test.lua` (9 checks of the plugin's own upload, incl. wrong secret and shell-injection attempts).
 
 ### Changed
