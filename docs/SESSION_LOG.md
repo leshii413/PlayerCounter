@@ -251,3 +251,12 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 - `docs/SETUP-INSTRUCTIONS.md`: copy of the owner-facing upload steps (no secret).
 - HANDOFF.md: new §0 "Taking over? Start here", live deployment notes (site live, server uploading, what the owner's screenshots confirmed), open items updated (live setup done; in-game vehicle names kept as optional with the API plan).
 - Pushed to `playercounter-2.1` (PR #3) and mirrored HANDOFF and this log to the claude.ai Project.
+
+### Prompt 25 (2026-10-27 14:37)
+
+> merge them as needed
+
+**Done**
+- Merged PR #2 into `main` (merge commit `fa16576`), retargeted PR #3 to `main` and merged it (`bd849c1`). Both were clean; regular merge commits keep the history. `main` is now PlayerCounter 2.1.0.
+- Tags and a release could not be created: `git push` of tags, the releases API and the git refs API all return HTTP 403 for this session type. Wrote `docs/RELEASE_NOTES_v2.1.0.md` so the owner can create the v2.1.0 release (and the v2.0.1 tag) on GitHub.
+- Updated HANDOFF.md (state: merged; tags pending) via a small PR from branch `handoff-after-merge`, merged into `main`; mirrored to the Project.
