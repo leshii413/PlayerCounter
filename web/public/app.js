@@ -418,6 +418,98 @@
 
   // Load --------------------------------------------------------------------------
 
+  // Player search ----------------------------------------------------------------
+
+  var searchQuery = "";
+
+  function vehicleText(p) {
+    if (p.driving && !p.driving.own) return "Watching " + (p.driving.owner || "another player") + " (" + vehicleName(p.driving) + ")";
+    if (p.driving) return vehicleName(p.driving);
+    if (p.vehicles && p.vehicles.length) return p.vehicles.slice(0, 3).map(vehicleName).join(", ");
+    return "On foot";
+  }
+
+  // Every player the page knows about, keyed by lower-case name: who is online,
+  // the series boards and each server's board.
+  function buildPlayerIndex(json) {
+    var index = {};
+    function entry(name) {
+      var key = String(name || "").trim().toLowerCase();
+      if (!key) return null;
+      if (!index[key]) index[key] = { name: String(name).trim(), online: [], servers: [], series: null, month: null };
+      return index[key];
+    }
+    var series = json.series || {};
+    (series.all_time || []).forEach(function (r) {
+      var e = entry(r.name);
+      if (e) e.series = { playtime: r.playtime_seconds, joins: r.joins, servers: r.servers, last_seen: r.last_seen };
+    });
+    (series.month || []).forEach(function (r) {
+      var e = entry(r.name);
+      if (e) e.month = { playtime: r.playtime_seconds, joins: r.joins };
+    });
+    json.servers.forEach(function (sv) {
+      (sv.players || []).forEach(function (p) {
+        var e = entry(p.name);
+        if (e) e.online.push({ server: sv.name, session: p.session_seconds, afk: p.afk, vehicle: vehicleText(p) });
+      });
+      if (sv.leaderboard) {
+        (sv.leaderboard.all_time || []).forEach(function (r) {
+          var e = entry(r.name);
+          if (e) e.servers.push({ server: sv.name, playtime: r.playtime_seconds, joins: r.joins, last_seen: r.last_seen });
+        });
+      }
+    });
+    return index;
+  }
+
+  function playerCard(p) {
+    var facts = [];
+    if (p.series) {
+      facts.push(h("li", null, "All time ", h("strong", { text: duration(p.series.playtime) }),
+        " over " + p.series.servers + (p.series.servers === 1 ? " server" : " servers") + ", " + n(p.series.joins) + " joins"));
+      facts.push(h("li", { text: "Last seen " + (p.series.last_seen ? fmtDate(p.series.last_seen) : "?") }));
+    }
+    if (p.month) facts.push(h("li", null, "This month ", h("strong", { text: duration(p.month.playtime) })));
+    var online = p.online.map(function (o) {
+      return h("li", null, h("span.status.status-online", { text: "Online" }), " on " + o.server + ": " + o.vehicle +
+        ", " + duration(o.session) + (o.afk ? " (AFK)" : ""));
+    });
+    var perServer = p.servers.map(function (s) {
+      return h("li", null, s.server + ": " + duration(s.playtime) + ", " + n(s.joins) + " joins" +
+        (s.last_seen ? ", last seen " + fmtDate(s.last_seen) : ""));
+    });
+    return h("article.player-card", null,
+      h("h3", { text: p.name }),
+      h("ul.search-facts", null, online, facts),
+      perServer.length ? h("ul.search-servers", { "aria-label": "Playtime per server" }, perServer) : null);
+  }
+
+  function drawSearch(json) {
+    var box = document.getElementById("search-results");
+    box.textContent = "";
+    var q = searchQuery.trim().toLowerCase();
+    if (!q) return;
+    var index = buildPlayerIndex(json);
+    var hits = Object.keys(index).filter(function (k) { return k.indexOf(q) !== -1; });
+    hits.sort(function (a, b) {
+      var ea = a === q ? 0 : 1, eb = b === q ? 0 : 1;
+      return ea - eb || (a < b ? -1 : a > b ? 1 : 0);
+    });
+    if (!hits.length) {
+      box.appendChild(h("p.empty-note", { text: "No player matching \"" + searchQuery.trim() + "\" is online or on the leaderboards." }));
+      return;
+    }
+    hits.slice(0, 20).forEach(function (k) { box.appendChild(playerCard(index[k])); });
+    if (hits.length > 20) box.appendChild(h("p.empty-note", { text: "Showing the first 20 of " + hits.length + " matches. Type more of the name." }));
+  }
+
+  function renderSearch(json) {
+    var section = document.getElementById("search-section");
+    section.hidden = !json.show_player_names;
+    if (json.show_player_names) drawSearch(json);
+  }
+
   function render() {
     document.title = data.title;
     document.getElementById("site-title").textContent = data.title;
@@ -429,6 +521,7 @@
              : "All times are " + zoneName() + ".");
     renderPlates(data.servers);
     renderSeries(data.series);
+    renderSearch(data);
     var box = document.getElementById("servers");
     box.textContent = "";
     data.servers.forEach(function (sv) { box.appendChild(renderServer(sv)); });
@@ -445,6 +538,13 @@
         document.getElementById("updated").textContent = "Couldn't load stats: " + err.message + ". Retrying in a minute.";
       });
   }
+
+  var searchInput = document.getElementById("player-search");
+  searchInput.addEventListener("input", function () {
+    searchQuery = searchInput.value;
+    if (data) drawSearch(data);
+  });
+  document.getElementById("search-form").addEventListener("submit", function (e) { e.preventDefault(); });
 
   load();
   setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);

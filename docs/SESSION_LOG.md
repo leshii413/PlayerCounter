@@ -260,3 +260,49 @@ A screenshot of the live stats.baja75series.org page showing "On the dirt right 
 - Merged PR #2 into `main` (merge commit `fa16576`), retargeted PR #3 to `main` and merged it (`bd849c1`). Both were clean; regular merge commits keep the history. `main` is now PlayerCounter 2.1.0.
 - Tags and a release could not be created: `git push` of tags, the releases API and the git refs API all return HTTP 403 for this session type. Wrote `docs/RELEASE_NOTES_v2.1.0.md` so the owner can create the v2.1.0 release (and the v2.0.1 tag) on GitHub.
 - Updated HANDOFF.md (state: merged; tags pending) via a small PR from branch `handoff-after-merge`, merged into `main`; mirrored to the Project.
+
+### Prompt 26 (2026-10-27 14:42, Asia/Singapore)
+
+> leshii413 playercounter repo
+>
+> Prepare to continue work
+
+**Done**: attached the repo, cloned `main` (f97344b), read CLAUDE.md, HANDOFF.md and the last log entries. No changes.
+
+### Prompt 27 (2026-10-28 23:41, Asia/Manila = UTC+8)
+
+> Look into data presented. Modify payer counter to include what is missing. To include if it is not already on this site, a search bar to search a player name
+>
+> https://info.carpmp.com/economy?tab=vehicles&preset=7d&from=1792597215&to=1793202015&minMissions=3&vehicleSort=moneyPerMinute&vehicleSortDir=desc&limit=50
+
+**Found**: the CarpMP economy page is rendered by JavaScript; the fetch tool got no table rows and the shell is refused by the proxy (403). The Chrome extension was not connected.
+
+**Decided**: D34 (player search built on the data the site already receives; no API change). CarpMP economy figures (payouts, $/min, trades) are not PlayerCounter data and are not added.
+
+**Done**: search section in `index.html`, `buildPlayerIndex()` / `drawSearch()` in `app.js`, styles in `style.css`.
+
+### Prompt 28 (2026-10-28 23:42, Asia/Manila)
+
+> Make it work for baja75series, not huge into role play
+
+**Done**: the page keeps the site title from `config.php` ("BAJA75SERIES server stats"); the search text is plain.
+
+### Prompt 29 (2026-10-28 23:43, Asia/Manila)
+
+(screenshot of the CarpMP economy Overview tab; no text)
+
+**Done**: the screenshot is CarpMP economy data (mission payouts, $/min, trades), not PlayerCounter data. Vehicle name not on the site's name table: Cherrier FCV.
+
+### Prompt 30 (2026-10-28 23:44, Asia/Manila)
+
+(four screenshots of the CarpMP economy Missions and Vehicles tabs; no text)
+
+**Done**: same as prompt 29. Vehicle names not on the site's name table: Cherrier FCV, Hirochi Sunburst, SP Dunekicker, Hirochi HT-55, FPV Wydra, Percheron. Model keys were not in the screenshots, so none were added.
+
+### Prompt 31 (2026-10-28 23:47, Asia/Manila)
+
+> 3, and look into any features of real world offrosd racing that would benefit the baja75 series for gameplay of offroad races
+
+**Decided**: option 3 (answer to "what next" with three choices): branch and PR for the player search, log and handoff. Vehicle names wait for model keys.
+
+**Done**: branch `web-player-search` with the search. Tests: `tests/run_web_test.sh` OK; browser check at 390px wide: a name shows its card, an unknown name shows the empty message, no horizontal scroll. The plugin suites were **not run**: Lua 5.3 is not on this machine and building it was refused by the tool permission check. The plugin is unchanged in this branch.

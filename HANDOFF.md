@@ -5,7 +5,7 @@
 > prompt-by-prompt history is in [`docs/SESSION_LOG.md`](docs/SESSION_LOG.md).
 > **Update both files in the same commit as any change you push** (rules in [`CLAUDE.md`](CLAUDE.md)).
 
-Last updated: 2026-10-27 14:45 (session 1; 2.1.0 merged to main) (session 1 part 2, Claude Code cloud session `session_01YMAAefrrzE187RmbqyseJo`)
+Last updated: 2026-10-28 23:50 (session 1 part 3; branch `web-player-search`, PR open for the player search; not yet merged)
 
 ## 0. Taking over? Start here
 
@@ -34,6 +34,7 @@ Research on similar tools and the feature roadmap: claude.ai doc "BeamMP Tools L
 | Plugin version | 2.1.0 on `playercounter-2.1` (`PLUGIN_VERSION` in `main.lua`); Discord script 2.1.0; `live.json` schema 2. |
 | Tested offline | Yes: 45/45 + 49/49 plugin checks (BeamMP mock, Lua 5.3), 7/7 client-mod checks (LuaJIT, stubbed game API), Discord script end to end vs fake panel + fake Discord incl. multipart graph upload, website end to end 20/20 (PHP 8.3 built-in server; content, privacy, merging, forged/old/replayed uploads), page screenshots desktop/mobile/dark with no console errors or horizontal scroll. |
 | Tested live | **Partly.** The website is live on Namecheap and at least one BeamMP server uploads to it with the St George calendar (2026-10-27). Not yet live-tested: the client mod in BeamNG, AFK in real play, and the Discord status script. |
+| Website player search | Branch `web-player-search` (PR open, not merged): a "Find a player" box on the stats page (`web/public/app.js`, `index.html`, `style.css`). Searches players online now and everyone in the server and series leaderboards; no API or plugin change. Tested: `tests/run_web_test.sh` OK; browser check at 390 px. Plugin suites not run this session (no Lua 5.3 on the machine). |
 | Website hosting | stats.baja75series.org is **live** on the owner's Namecheap shared hosting, and at least one BeamMP server is uploading with the St George calendar (owner screenshots, 2026-10-27 14:10). Owner received ready-to-extract zips (2026-10-27): `stats.baja75series.org-site.zip` (site + filled `config.php`) and `BeamMP-server-files.zip` (main.lua, `data/website.json`, client mod) plus `SETUP-INSTRUCTIONS.md`. The shared secret exists **only in those zips** (generated in-session, never committed, not in the Project or memory); a new session cannot recover it and should generate a new one for both sides if needed. |
 
 ### Live deployment (2026-10-27)
@@ -160,6 +161,7 @@ Resources/Server/PlayerCounter/data/
 | D31 | Time zone = St George, Utah (US Mountain): plugin `utc_offset_hours` -7 + `dst` "us" (new US/EU DST rules in Lua, `time_zone_name`); website shows all times in `America/Denver` for every visitor (`display_time_zone`). Both preset in the owner's zips (server zip now ships `data/config.json`; re-extracting it overwrites that file). | Owner's request (2026-10-27); a fixed offset would be an hour off half the year. |
 | D32 | Website shows times in each visitor's own time zone (`display_time_zone` empty in the owner's config.php); the plugin calendar stays St George, Utah (heatmap labelled with it). Supersedes the website half of D31. | Owner's request (2026-10-27 13:57). |
 | D33 | Every time on the website follows the visitor's zone: graph, peak, updated, heatmap (rotated in the browser from the server calendar), leaderboard last-seen dates (api.php sends full UTC timestamps). Only Today/month/year totals use the server calendar and the page says so. | Owner's request (2026-10-27 14:11). |
+| D34 | Player search is client-side on the data `api.php` already sends (online players + leaderboards). Not a full player index: a player outside the top `leaderboard_size` boards is not found. A full index would need the plugin to export every player (not done). | Owner asked for a search bar with no new server data; keeps the plugin and deployed zips unchanged. |
 
 ## 6. Open items / next steps
 
@@ -173,6 +175,9 @@ Resources/Server/PlayerCounter/data/
 8. Remaining roadmap (research doc): BeamJoy race/event stats, better retention measures (second-session return, day-7/30, cohorts, activity labels), vehicle/mod usage stats, network-wide totals, milestone posts and offline role ping, player profiles + `/stats <player>`, friend alerts, scheduled messages, privacy tools, public stats page; plus improvements: split `joins.csv` monthly, move player records out of `stats.json`, DST-aware calendar, uptime/unclean-shutdown tracking, public server list fallback in the Discord script.
 9. Possible: add vanilla names for more BeamNG models / Baja75 mod vehicles in `VEHICLE_NAMES` or the config's `vehicle_names`.
 10. Possible: per-server channel/thread support already exists (`webhook_url` per server, `thread_id` query kept); not tested on real Discord threads.
+11. **Vehicle names for the site (owner's CarpMP screenshots, 2026-10-28)**: not on `VEHICLES` in `app.js`: Cherrier FCV, Hirochi Sunburst, SP Dunekicker, Hirochi HT-55, FPV Wydra, Percheron. Needs the BeamNG model key for each (the screenshots show display names only); add them to `VEHICLES` once known.
+12. **CarpMP economy figures** (payouts, $/min, trades, from info.carpmp.com/economy) are not part of PlayerCounter; no data feed available. Only a manual snapshot would be possible, and the owner has not asked for it.
+13. **Plugin suites not re-run** on branch `web-player-search` (no Lua 5.3 here). Run `tests/run_plugin_tests.sh` before merging.
 
 ## 7. How to verify after any change
 

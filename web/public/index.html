@@ -25,6 +25,16 @@
       <div class="plates" id="plates"></div>
     </section>
 
+    <section class="wrap search-section" id="search-section" aria-labelledby="search-heading" hidden>
+      <h2 id="search-heading" class="section-title">Find a player</h2>
+      <form class="search-form" role="search" id="search-form" autocomplete="off">
+        <label class="sr-only" for="player-search">Player name</label>
+        <input type="search" id="player-search" name="q" placeholder="Type a player name" maxlength="40" spellcheck="false">
+      </form>
+      <p class="chart-note" id="search-note">Searches players online now and everyone on the leaderboards.</p>
+      <div id="search-results" aria-live="polite"></div>
+    </section>
+
     <section class="wrap board-section" id="series-section" aria-labelledby="series-heading" hidden>
       <div class="board-head">
         <h2 id="series-heading" class="section-title">Seat time across the series</h2>
